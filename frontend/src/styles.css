@@ -140,3 +140,21 @@ ins { color: #4ade80; text-decoration: none; font-weight: 600; }
   .app { height: auto; }
   .transcript, .feed { max-height: 50vh; }
 }
+
+/* audio meters */
+.meters { display: inline-flex; gap: 10px; font-size: 11px; color: var(--muted); }
+.meter { display: inline-flex; align-items: center; gap: 5px; }
+.meter-bar { width: 48px; height: 6px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; }
+.meter-bar > span { display: block; height: 100%; background: var(--green); transition: width .08s linear; }
+
+/* customer soundboard */
+.soundboard { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+.soundboard h1 { font-size: 22px; margin: 0 0 4px; }
+.soundboard .banner { margin-top: 12px; border-radius: 8px; }
+.soundboard ol { list-style: none; padding: 0; margin: 20px 0; display: flex; flex-direction: column; gap: 10px; counter-reset: line -1; }
+.soundboard li { counter-increment: line; display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; flex-wrap: wrap; }
+.soundboard li::before { content: counter(line); font-weight: 700; color: var(--muted); width: 18px; }
+.soundboard li.playing { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.soundboard li.done { opacity: .55; }
+.soundboard .line { flex: 1; font-size: 16px; min-width: 200px; }
+.soundboard .actions { display: flex; gap: 6px; }

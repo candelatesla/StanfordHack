@@ -77,6 +77,29 @@ function reducer(state, ev) {
   }
 }
 
+function LevelMeters({ sources }) {
+  const [levels, setLevels] = useState([0, 0]);
+  useEffect(() => {
+    let raf;
+    const tick = () => {
+      setLevels(sources.map((s) => s.level()));
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [sources]);
+  return (
+    <span className="meters" title="Audio input levels">
+      {["Customer", "Rep"].map((label, i) => (
+        <span key={label} className="meter">
+          {label}
+          <span className="meter-bar"><span style={{ width: `${Math.min(100, (levels[i] || 0) * 250)}%` }} /></span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initial);
   const [conn, setConn] = useState("connecting");
@@ -156,6 +179,7 @@ export default function App() {
             <span className="dot" />
             {listening ? "Listening" : conn === "connected" ? "Ready" : "Reconnecting"}
           </span>
+          {listening && <LevelMeters sources={audio.current} />}
           <span className="pill subtle" title="Model mode">
             {state.status.llm ? "Nebius LLM" : "Rules-only mode"}
           </span>

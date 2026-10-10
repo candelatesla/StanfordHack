@@ -21,6 +21,7 @@ class Session:
         self.suggestions: dict[str, dict] = {}
         self.accepted: list[str] = []
         self.escalated: list[str] = []
+        self.last_customer_turn: dict | None = None
         self._ids = itertools.count(1)
         self.started = time.time()
 

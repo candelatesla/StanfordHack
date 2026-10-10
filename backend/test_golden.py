@@ -43,3 +43,20 @@ with TestClient(app) as c, c.websocket_connect("/ws/events") as ws:
     print("SUMMARY agreed:", s["agreed"], "\nopen:", s["open_items"], "\ncrm:", s["crm_changes"])
     assert upd["fields"]["arr"] == 127500
 print("GOLDEN DEMO OK")
+
+# STT split one ask across two turns -> one card, updated in place with the merged ask
+with TestClient(app) as c, c.websocket_connect("/ws/events") as ws:
+    ws.receive_json()
+    ws.send_json({"type": "reset"})
+    until(ws, lambda e: e["type"] == "init")
+    ws.send_json({"type": "text_turn", "speaker": "customer", "text": "Can you do 20% off"})
+    first = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
+    ws.send_json({"type": "text_turn", "speaker": "customer", "text": "if we sign for three years?"})
+    second = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
+    print(f"split: {first['id']} {first['request']!r} -> {second['id']} {second['request']!r}")
+    assert first["id"] == second["id"] and second["proposed_changes"] == {"discount_pct": 15, "term_years": 3}
+    # repeat of the same ask -> same card
+    ws.send_json({"type": "text_turn", "speaker": "customer", "text": "So can you do 20% off for 3 years?"})
+    third = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
+    assert third["id"] == first["id"], third["id"]
+print("SPLIT/DEDUPE OK")

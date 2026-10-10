@@ -1,10 +1,34 @@
+import { useState } from "react";
+
+function toMarkdown(s) {
+  const list = (xs) => (xs?.length ? xs.map((x) => `- ${x}`).join("\n") : "- None");
+  return [
+    `## Call summary: ${s.customer}`,
+    s.recap,
+    `### Agreed\n${list(s.agreed)}`,
+    `### Open items\n${list(s.open_items)}`,
+    `### CRM changes\n${list(s.crm_changes.map((c) => `${c.field}: ${c.old} → ${c.new}`))}`,
+    `### Contract redlines\n${list(s.contract_diff.map((d) => `${d.clause}: ${d.old} → ${d.new}`))}`,
+    `### Next steps\n${list(s.next_steps)}`,
+  ].filter(Boolean).join("\n\n");
+}
+
 export default function PostCallSummary({ summary: s, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    await navigator.clipboard.writeText(toMarkdown(s));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h2>Post-call summary · {s.customer}</h2>
-          <button className="btn ghost" onClick={onClose}>✕</button>
+          <div>
+            <button className="btn sm" onClick={copy}>{copied ? "✓ Copied" : "Copy as Markdown"}</button>
+            <button className="btn ghost" onClick={onClose}>✕</button>
+          </div>
         </div>
         {s.recap && <p className="recap">{s.recap}</p>}
         <Section title="✓ Agreed" items={s.agreed} empty="Nothing agreed yet." />

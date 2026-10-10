@@ -14,7 +14,20 @@ cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.
 cd frontend && npm install && npm run dev      # http://localhost:5173
 ```
 
-Smoke test the golden demo (text mode, works with or without keys): `cd backend && .venv/Scripts/python test_golden.py`
+## Tests and tools
+
+| Command (from repo root) | Needs | What it checks |
+|---|---|---|
+| `cd backend && .venv/Scripts/python test_golden.py` | nothing | 4 golden lines → right verdicts, CRM/contract, summary, split-turn merge |
+| `cd backend && .venv/Scripts/python test_trigger.py` | nothing | regex extractor on STT-style phrasings ("net sixty", "three times fees") |
+| `backend/.venv/Scripts/python tools/check_keys.py` | keys | lists Nebius models, times them, picks FAST/SMART/EMBED; tests TTS + batch + realtime STT |
+| `backend/.venv/Scripts/python tools/test_audio.py` | keys + running backend | TTS golden lines streamed into `/ws/audio` → expects the right cards; prints speech-end→card latency |
+| `backend/.venv/Scripts/python demo/make_audio.py` | ElevenLabs key | pre-generates the customer MP3s |
+
+## Demo pages
+
+- `/` : the rep's copilot (laptop 1). **Start listening** → pick the Meet tab → tick "Also share tab audio".
+- `/customer` : soundboard for laptop 2. Plays each scripted line as ElevenLabs TTS into the Meet, or "Type it" to send as text.
 
 Single-port mode (also what Replit runs): `bash start.sh` → http://localhost:8000
 

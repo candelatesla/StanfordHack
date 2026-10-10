@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 import config
-from agent.llm import client
+from agent.llm import client, resolve_embed_model
 
 
 @dataclass
@@ -60,6 +60,7 @@ async def build_index() -> Index:
     INDEX.idf = {t: math.log((n + 1) / (c + 0.5)) for t, c in df.items()}
     if client is not None:
         try:
+            await resolve_embed_model()
             INDEX.vectors = await embed([f"{c.title}: {c.text}" for c in INDEX.chunks])
         except Exception as e:  # keep the demo alive on keyword search
             print(f"[ingest] embeddings failed, using keyword search: {e}")

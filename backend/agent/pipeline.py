@@ -39,14 +39,39 @@ def proposed_changes(verdict: dict) -> dict:
                      "hipaa_baa", "eu_residency", "tier"}}
 
 
+MERGE_WINDOW_S = 3.0   # STT can split one ask across two committed turns
+DEDUPE_WINDOW_S = 30.0  # don't stack identical cards if the customer repeats themselves
+
+
+def _find_reusable_card(session: Session, trig: dict, request: str, follow_up_of: str | None) -> str | None:
+    """Update an open card instead of stacking a new one: a split/clarified ask, or a repeated one."""
+    if follow_up_of and (card := session.suggestions.get(follow_up_of)) and not card.get("resolution") \
+            and card["category"] == trig["category"]:
+        return follow_up_of
+    now = time.time()
+    for sid, card in reversed(session.suggestions.items()):
+        if not card.get("resolution") and now - card["created"] < DEDUPE_WINDOW_S and card["request"] == request:
+            return sid
+    return None
+
+
 async def on_final_customer_turn(session: Session, text: str):
     t0 = time.perf_counter()
+    prev = session.last_customer_turn
+    recent = prev if prev and time.time() - prev["ts"] < MERGE_WINDOW_S else None
+    session.last_customer_turn = turn = {"text": text, "ts": time.time(), "card": None}
     context = session.transcript[-6:-1]
+    trigger_text = text
     trig = await trigger(text, context)
+    if not trig.get("needs_brain") and recent:
+        # a fragment like "...if we sign for 3 years" only makes sense joined to the previous turn
+        trigger_text = f"{recent['text']} {text}"
+        trig = await trigger(trigger_text, context[:-1])
     t_trigger = _ms(t0)
     if not trig.get("needs_brain"):
         print(f"[pipeline] no brain needed ({t_trigger}ms): {text!r}")
         return
+    turn["text"] = trigger_text
 
     deal = session.deal
     t1 = time.perf_counter()
@@ -58,13 +83,15 @@ async def on_final_customer_turn(session: Session, text: str):
     brain_ms = _ms(t0)
     print(f"[pipeline] trigger={t_trigger}ms retrieve+rules={t_lookup}ms brain_total={brain_ms}ms verdict={verdict['verdict']}")
 
-    sid = session.next_id()
+    request = describe_request(trig)
+    sid = _find_reusable_card(session, trig, request, recent and recent["card"]) or session.next_id()
+    turn["card"] = sid
     card = {
-        "type": "suggestion", "id": sid, "status": "streaming",
+        "type": "suggestion", "id": sid, "status": "streaming", "created": time.time(),
         "verdict": verdict["verdict"],
         "category": trig["category"],
-        "request": describe_request(trig),
-        "customer_text": text,
+        "request": request,
+        "customer_text": trigger_text,
         "answer": "", "counteroffer": "",
         "sources": [{"title": s["title"], "snippet": s["snippet"]} for s in sources[:2]],
         "proposed_changes": proposed_changes(verdict),
@@ -77,7 +104,7 @@ async def on_final_customer_turn(session: Session, text: str):
     await session.emit(card)
 
     first_token_ms = None
-    async for partial in respond(text, trig, verdict, sources):
+    async for partial in respond(trigger_text, trig, verdict, sources):
         if first_token_ms is None:
             first_token_ms = _ms(t0)
         card.update(partial)

@@ -10,6 +10,7 @@ import base64
 import io
 import json
 import wave
+from urllib.parse import urlencode
 from typing import Awaitable, Callable
 
 import httpx
@@ -31,8 +32,10 @@ class RealtimeSTT:
         self.reader: asyncio.Task | None = None
 
     async def start(self):
-        params = f"model_id={config.STT_REALTIME_MODEL}&audio_format=pcm_16000&commit_strategy=vad"
-        self.ws = await websockets.connect(f"{self.URL}?{params}",
+        params = [("model_id", config.STT_REALTIME_MODEL), ("audio_format", "pcm_16000"),
+                  ("commit_strategy", "vad"), ("vad_silence_threshold_secs", "0.6"), ("language_code", "en")]
+        params += [("keyterms", k) for k in config.STT_KEYTERMS]
+        self.ws = await websockets.connect(f"{self.URL}?{urlencode(params)}",
                                            additional_headers={"xi-api-key": config.ELEVENLABS_API_KEY},
                                            open_timeout=5)
         self.reader = asyncio.create_task(self._read())
@@ -45,10 +48,10 @@ class RealtimeSTT:
                 text = (msg.get("text") or "").strip()
                 if kind == "partial_transcript" and text:
                     await self.on_text(text, False)
-                elif kind.startswith("committed_transcript") and text:
+                elif kind == "committed_transcript" and text:
                     await self.on_text(text, True)
-                elif "error" in kind:
-                    print(f"[stt] realtime error: {msg}")
+                elif "error" in msg:
+                    print(f"[stt] realtime {kind}: {msg['error']}")
         except websockets.ConnectionClosed:
             pass
 

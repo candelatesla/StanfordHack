@@ -7,15 +7,17 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import config
 import contract
 import crm
+import demo
 import stt
 import summary
+from agent.llm import warmup
 from agent.pipeline import on_final_customer_turn
 from brain.ingest import INDEX, build_index
 from session import SESSION
@@ -36,6 +38,8 @@ async def lifespan(app: FastAPI):
     crm.init()
     SESSION.reset()
     await build_index()
+    if config.LLM_ENABLED:
+        await warmup()
     print(f"[startup] LLM {'enabled: ' + config.FAST_MODEL + ' / ' + config.SMART_MODEL if config.LLM_ENABLED else 'disabled (heuristic mode)'}")
     print(f"[startup] STT {'enabled (' + config.STT_MODE + ')' if config.ELEVENLABS_API_KEY else 'disabled (no ELEVENLABS_API_KEY)'}")
     yield
@@ -146,6 +150,20 @@ async def ws_audio(ws: WebSocket, speaker: str = "customer"):
         pass
     finally:
         await stream.close()
+
+
+@app.get("/api/demo/lines")
+async def demo_lines():
+    return {"lines": demo.LINES, "tts": bool(config.ELEVENLABS_API_KEY)}
+
+
+@app.get("/api/demo/audio/{i}.mp3")
+async def demo_audio(i: int):
+    if not 0 <= i < len(demo.LINES):
+        raise HTTPException(404)
+    if not config.ELEVENLABS_API_KEY and not (demo.AUDIO_DIR / f"{i}.mp3").exists():
+        raise HTTPException(503, "ELEVENLABS_API_KEY not set")
+    return Response(await demo.line_audio(i), media_type="audio/mpeg")
 
 
 if config.FRONTEND_DIST.exists():

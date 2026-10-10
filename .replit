@@ -1,5 +1,10 @@
+modules = ["python-3.11", "nodejs-20"]
 run = "bash start.sh"
-entrypoint = "backend/main.py"
+
+# Single always-on instance: call state lives in memory, so don't autoscale.
+[deployment]
+run = ["bash", "start.sh"]
+deploymentTarget = "gce"
 
 [[ports]]
 localPort = 8000

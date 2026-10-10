@@ -1,4 +1,5 @@
 """Small model: does this customer turn need the Company Brain? Extract a structured request."""
+import asyncio
 import json
 import re
 
@@ -26,23 +27,39 @@ CATEGORIES = {"pricing", "payment", "compliance", "legal", "product"}
 
 
 async def trigger(text: str, context: list[dict]) -> dict:
+    """LLM extraction within TRIGGER_TIMEOUT_S, merged with the regex extractor as a safety net."""
+    rule_based = heuristic(text)
     if client is None:
-        return heuristic(text)
-    ctx = "\n".join(f"{t['speaker'].upper()}: {t['text']}" for t in context[-4:])
+        return rule_based
     try:
-        resp = await client.chat.completions.create(
-            model=config.FAST_MODEL,
-            messages=[{"role": "system", "content": PROMPT},
-                      {"role": "user", "content": f"Context:\n{ctx}\n\nLatest CUSTOMER turn: {text}"}],
-            temperature=0,
-            max_tokens=200,
-            response_format={"type": "json_object"},
-        )
-        out = json.loads(resp.choices[0].message.content)
-        return _normalise(out, text)
+        out = await asyncio.wait_for(_llm_trigger(text, context), config.TRIGGER_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        print(f"[trigger] LLM over {config.TRIGGER_TIMEOUT_S * 1000:.0f}ms budget, using heuristic")
+        return rule_based
     except Exception as e:
         print(f"[trigger] LLM failed, heuristic fallback: {e}")
-        return heuristic(text)
+        return rule_based
+    if not out["needs_brain"]:
+        return rule_based  # a keyword hit (%, net-60, HIPAA...) beats a false negative on a live call
+    if rule_based["needs_brain"]:
+        # numbers from the regex are literal; fill anything the model missed
+        for k, v in rule_based["request"].items():
+            if out["request"].get(k) is None and v is not None:
+                out["request"][k] = v
+    return out
+
+
+async def _llm_trigger(text: str, context: list[dict]) -> dict:
+    ctx = "\n".join(f"{t['speaker'].upper()}: {t['text']}" for t in context[-4:])
+    resp = await client.chat.completions.create(
+        model=config.FAST_MODEL,
+        messages=[{"role": "system", "content": PROMPT},
+                  {"role": "user", "content": f"Context:\n{ctx}\n\nLatest CUSTOMER turn: {text}"}],
+        temperature=0,
+        max_tokens=200,
+        response_format={"type": "json_object"},
+    )
+    return _normalise(json.loads(resp.choices[0].message.content), text)
 
 
 def _normalise(out: dict, text: str) -> dict:
@@ -64,9 +81,25 @@ def _num(s: str):
     return _WORDNUM.get(s) or float(s)
 
 
+_UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve "
+                                     "thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_SPOKEN = re.compile(r"\b(" + "|".join(_TENS) + r")(?:[\s-](" + "|".join(list(_UNITS)[1:10]) + r"))?\b|\b("
+                     + "|".join(_UNITS) + r")\b")
+
+
+def words_to_digits(t: str) -> str:
+    """STT often spells numbers out: 'twenty five percent' -> '25 percent', 'net sixty' -> 'net 60'."""
+    def sub(m):
+        if m.group(1):
+            return str(_TENS[m.group(1)] + (_UNITS[m.group(2)] if m.group(2) else 0))
+        return str(_UNITS[m.group(3)])
+    return _SPOKEN.sub(sub, t)
+
+
 def heuristic(text: str) -> dict:
     """Keyword/regex extractor. Used without an API key and as a safety net when the LLM fails."""
-    t = text.lower()
+    t = words_to_digits(text.lower().replace("thirty-", "thirty ").replace(",", ""))
     req = {k: None for k in SCHEMA["request"]}
     n = r"(\d+(?:\.\d+)?|one|two|three|four|five)"
 
