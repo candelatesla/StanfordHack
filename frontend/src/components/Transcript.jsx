@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "react";
 
 const NAME = { customer: "Customer", rep: "Rep", auto: "…" };
+const VIA = {
+  voice: "identified by voice",
+  wording: "guessed from wording",
+  llm: "decided by the LLM from context",
+  calibration: "voice calibration",
+  manual: "set by you",
+};
 
 export default function Transcript({ turns, partial, onFlip }) {
   const end = useRef(null);
@@ -18,9 +25,9 @@ export default function Transcript({ turns, partial, onFlip }) {
       {turns.map((t) => (
         <div key={t.id} className={`turn ${t.speaker}`}>
           <button className="who" onClick={() => onFlip(t)}
-            title={`${t.auto ? "Auto-detected" : "Set"} as ${NAME[t.speaker]}. Click to switch to ${t.speaker === "customer" ? "Rep" : "Customer"}.`}>
+            title={`${NAME[t.speaker]}: ${VIA[t.via] || (t.auto ? "auto-detected" : "from the audio source")}. Click to switch to ${t.speaker === "customer" ? "Rep" : "Customer"}.`}>
             {NAME[t.speaker]}
-            {t.auto && <span className="auto-tag">auto</span>}
+            {t.auto && <span className="auto-tag">{t.via === "voice" || t.via === "calibration" ? "voice" : "auto"}</span>}
           </button>
           <span className="text">{t.text}</span>
         </div>

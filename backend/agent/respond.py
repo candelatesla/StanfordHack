@@ -15,7 +15,9 @@ Never offer anything beyond the verdict's "allowed" values. Only state what the 
 don't invent restrictions. Never mention field names, rule IDs or file names; use plain sales language
 (e.g. "Net 60", "15% for a 3-year term"). Keep each line under 25 words. If the verdict is escalate, SAY should
 offer the allowed fallback (if any) and promise to get an answer from the approver quickly.
-If no rule covers the request, say it is not in the Company Brain and should be flagged for follow-up."""
+If the verdict's rule_id is null, it is a knowledge question or an objection: answer it from the sources only
+(facts, numbers, the recommended talk track). If the sources don't contain the answer, say it isn't in the
+Company Brain and suggest following up in writing."""
 
 
 async def respond(customer_text: str, trig: dict, verdict: dict, sources: list[dict],
@@ -78,9 +80,9 @@ def template(trig: dict, verdict: dict, sources: list[dict]) -> dict:
     v, allowed, reason = verdict["verdict"], verdict.get("allowed") or {}, verdict.get("reason", "")
     approver = verdict.get("approval_needed")
     if verdict.get("rule_id") is None:
-        if sources:
-            return {"answer": f"No rule covers this. Closest source: {sources[0]['title']}.",
-                    "counteroffer": "Great question. Let me confirm the specifics and follow up in writing today."}
+        if sources:  # knowledge question / objection: quote the best-matching sentences
+            return {"answer": sources[0]["snippet"],
+                    "counteroffer": "Good question. " + sources[0]["snippet"].split(". ")[0].rstrip(".") + "."}
         return {"answer": "Not in Company Brain. Flag for follow-up.",
                 "counteroffer": "Let me confirm that with the team and get back to you today."}
     say = ""

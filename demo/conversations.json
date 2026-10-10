@@ -1,0 +1,94 @@
+{
+  "_format": "each turn: [speaker, text, needs_answer, expected_doc_title_or_null, expected_verdict_or_null]",
+  "calls": [
+    {
+      "name": "Acme Health negotiation",
+      "turns": [
+        ["rep", "Hey Dana, good to see you again. Can you hear me okay?", false, null, null],
+        ["customer", "Yep, loud and clear. Sorry, I'm a couple of minutes late, back-to-back meetings today.", false, null, null],
+        ["rep", "No worries at all. How was the conference last week?", false, null, null],
+        ["customer", "Honestly exhausting, but good. Lots of talk about AI, as you'd expect.", false, null, null],
+        ["rep", "Ha, I bet. So last time we left off with the Enterprise proposal. Where did your team land?", false, null, null],
+        ["customer", "Thanks for making time. We've reviewed the Enterprise proposal.", false, null, null],
+        ["customer", "Can you do 20% off if we sign for 3 years?", true, "Discount Policy", "counter"],
+        ["rep", "We can do 15% with a three-year commitment, and that's approved today.", false, null, null],
+        ["customer", "Okay, that's helpful.", false, null, null],
+        ["customer", "We're in healthcare. Do you sign a HIPAA BAA?", true, "HIPAA and Business Associate Agreements", "info"],
+        ["rep", "Yes, the BAA is included in your Enterprise plan.", false, null, null],
+        ["customer", "Great. We need net-60 payment terms.", true, "Payment Terms", "approved"],
+        ["rep", "Net 60 works for a deal this size.", false, null, null],
+        ["customer", "Can you raise the liability cap to 3x fees?", true, "Liability and Indemnity", "escalate"],
+        ["rep", "Let me check with our Legal team and get back to you on the cap.", false, null, null],
+        ["customer", "Sounds good. Send over the paperwork when you can.", false, null, null],
+        ["rep", "Will do. Have a great rest of your week!", false, null, null],
+        ["customer", "You too, bye!", false, null, null]
+      ]
+    },
+    {
+      "name": "Retail discovery call",
+      "turns": [
+        ["rep", "Hi Marcus, thanks for jumping on. How's your morning going?", false, null, null],
+        ["customer", "Good, good. Busy. We're in the middle of holiday planning, so it's a bit chaotic.", false, null, null],
+        ["rep", "I can imagine. Is it snowing over there yet?", false, null, null],
+        ["customer", "Not yet, thankfully. Give it two weeks.", false, null, null],
+        ["rep", "So tell me a little about how your team does reporting today.", false, null, null],
+        ["customer", "Right now it's a mess of spreadsheets and an old BI tool nobody likes.", false, null, null],
+        ["customer", "All our data lives in Snowflake and Shopify. Do you connect to those?", true, "Integrations", null],
+        ["rep", "Snowflake for sure, it's one of our native connectors.", false, null, null],
+        ["customer", "We'd have about 80 people building dashboards. How does pricing work for that?", true, "Seats and Usage", "info"],
+        ["rep", "Viewers are free, so it's really about the creators.", false, null, null],
+        ["customer", "Got it. And what about the AI stuff? Is our data used to train your models?", true, "AI Features", null],
+        ["customer", "Our security team is going to send over a big questionnaire. Can you fill that out?", true, "Security Overview", null],
+        ["rep", "Absolutely, we have most of it pre-filled.", false, null, null],
+        ["customer", "Honestly though, we don't have budget until next quarter.", true, "Objection: Timing and Budget", null],
+        ["rep", "That's fair. What changes for you next quarter?", false, null, null],
+        ["customer", "New fiscal year. The CFO frees up the innovation budget.", false, null, null],
+        ["customer", "Could we do some kind of free trial in the meantime?", true, "Pilots and Trials", "counter"],
+        ["rep", "Let me see what we can do there.", false, null, null],
+        ["customer", "Cool. Alright, I've got to jump to another call, thanks!", false, null, null],
+        ["rep", "Thanks Marcus, talk soon.", false, null, null]
+      ]
+    },
+    {
+      "name": "Fintech negotiation",
+      "turns": [
+        ["customer", "Hi! Sorry, my camera's being weird today.", false, null, null],
+        ["rep", "No problem at all. Did you get a chance to look at the proposal?", false, null, null],
+        ["customer", "I did. Honestly, it's more expensive than we expected.", true, "Objection: Price Too High", null],
+        ["rep", "Understood. What were you comparing it against?", false, null, null],
+        ["customer", "We have a quote from a competitor that's about thirty percent lower.", true, "Competitor Objections", null],
+        ["rep", "Would you be open to sharing it so we can compare like-for-like?", false, null, null],
+        ["customer", "Maybe. If we went with you, could you waive the implementation fee?", true, "Implementation and Onboarding", "counter"],
+        ["customer", "And we'd want renewal increases capped at three percent.", true, "Contract Terms and Renewals", "counter"],
+        ["rep", "Those are reasonable asks, let me walk through what's possible.", false, null, null],
+        ["customer", "We also can't start until March. Could the start date be ninety days out?", true, "Contract Terms and Renewals|Objection: Timing and Budget", "approved"],
+        ["customer", "Our CFO and legal team will need to sign off on all of this.", true, "Objection: Need Other Stakeholders", null],
+        ["rep", "Makes sense. Should we set up a call with them next week?", false, null, null],
+        ["customer", "That works. Also, procurement will need a W-9 and your insurance certificate.", true, "Procurement and Vendor Onboarding", null],
+        ["customer", "One more thing, if we leave, do we get our data back and do you delete it?", true, "Data Ownership, Retention and Deletion", null],
+        ["rep", "Yes, you own your data. I'll send the details in writing.", false, null, null],
+        ["customer", "Perfect, thanks so much. Talk next week.", false, null, null]
+      ]
+    },
+    {
+      "name": "Rapport-heavy check-in",
+      "turns": [
+        ["rep", "Priya! How was the trip to Lisbon?", false, null, null],
+        ["customer", "Oh it was amazing. The food, the weather, everything. I didn't want to come back.", false, null, null],
+        ["rep", "I'm so jealous. Did you get to Sintra?", false, null, null],
+        ["customer", "We did, the kids loved the castle. My son is now obsessed with knights.", false, null, null],
+        ["rep", "That's adorable. Okay, I know you only have twenty minutes, so let's dive in.", false, null, null],
+        ["customer", "Yeah, let's do it. So the team's been asking how big you guys actually are.", true, "Company Overview", null],
+        ["rep", "Sure, happy to share.", false, null, null],
+        ["customer", "Also, what happens if your service goes down in the middle of the night?", true, "SLA and Support", null],
+        ["customer", "And do you have other healthcare customers we could talk to?", true, "Customer References and Case Studies", null],
+        ["rep", "We do, I can set up a reference call.", false, null, null],
+        ["customer", "Is single-tenant on your roadmap? Our architects keep asking.", true, "Roadmap and Feature Requests", null],
+        ["rep", "It's planned, but I can't commit to dates.", false, null, null],
+        ["customer", "Totally fair. Did you watch the game last night by the way?", false, null, null],
+        ["rep", "I did, what a finish!", false, null, null],
+        ["customer", "Unbelievable. Okay, I'll let you go. Thanks!", false, null, null]
+      ]
+    }
+  ]
+}

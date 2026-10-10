@@ -1,28 +1,115 @@
 {
   "tiers": {
-    "Starter":    {"list_arr": 30000,  "features": ["core_analytics"]},
-    "Growth":     {"list_arr": 80000,  "features": ["core_analytics", "sso", "api"]},
-    "Enterprise": {"list_arr": 150000, "features": ["core_analytics", "sso", "api", "hipaa_baa", "eu_residency", "dedicated_csm"]}
+    "Starter": {
+      "list_arr": 30000,
+      "features": [
+        "core_analytics"
+      ]
+    },
+    "Growth": {
+      "list_arr": 80000,
+      "features": [
+        "core_analytics",
+        "sso",
+        "api"
+      ]
+    },
+    "Enterprise": {
+      "list_arr": 150000,
+      "features": [
+        "core_analytics",
+        "sso",
+        "api",
+        "hipaa_baa",
+        "eu_residency",
+        "dedicated_csm"
+      ]
+    }
   },
   "discounts": {
     "rep_max_pct": 10,
-    "by_term_years": {"1": 10, "2": 12, "3": 15},
-    "approval": [{"above_pct": 15, "approver": "VP Sales"}, {"above_pct": 25, "approver": "CFO"}]
+    "by_term_years": {
+      "1": 10,
+      "2": 12,
+      "3": 15
+    },
+    "approval": [
+      {
+        "above_pct": 15,
+        "approver": "VP Sales"
+      },
+      {
+        "above_pct": 25,
+        "approver": "CFO"
+      }
+    ]
   },
   "payment_terms": {
     "default_days": 30,
-    "allowed": [{"days": 60, "min_arr": 100000}],
+    "allowed": [
+      {
+        "days": 60,
+        "min_arr": 100000
+      }
+    ],
     "escalate_above_days": 60,
     "approver": "Finance"
   },
   "compliance": {
     "soc2_type2": true,
     "gdpr_dpa": "standard",
-    "hipaa_baa": {"available": true, "tiers": ["Enterprise"]},
-    "eu_residency": {"available": true, "tiers": ["Enterprise"], "uplift_pct": 10}
+    "hipaa_baa": {
+      "available": true,
+      "tiers": [
+        "Enterprise"
+      ]
+    },
+    "eu_residency": {
+      "available": true,
+      "tiers": [
+        "Enterprise"
+      ],
+      "uplift_pct": 10
+    }
   },
   "legal": {
-    "liability_cap_multiple": {"default": 1, "max_without_approval": 2, "approver": "Legal"},
+    "liability_cap_multiple": {
+      "default": 1,
+      "max_without_approval": 2,
+      "approver": "Legal"
+    },
     "termination_for_convenience": false
+  },
+  "pilot": {
+    "max_days_without_approval": 30,
+    "paid": true,
+    "credited_to_contract": true,
+    "approver": "VP Sales"
+  },
+  "implementation": {
+    "fee": 15000,
+    "waive_min_term_years": 2,
+    "approver": "VP Sales"
+  },
+  "renewal": {
+    "standard_uplift_max_pct": 7,
+    "rep_cap_min_pct": 5,
+    "approver": "VP Sales",
+    "auto_renew_months": 12,
+    "notice_days": 60
+  },
+  "start_date": {
+    "max_delay_days_without_approval": 90,
+    "approver": "Finance"
+  },
+  "seats": {
+    "included_creators": {
+      "Starter": 5,
+      "Growth": 20,
+      "Enterprise": 50
+    },
+    "extra_creator_price": 600,
+    "block_size": 25,
+    "block_discount_pct": 10
   }
 }

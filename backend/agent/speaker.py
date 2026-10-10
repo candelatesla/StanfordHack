@@ -57,7 +57,7 @@ def echo_of_card(text: str, cards: list[dict]) -> float:
 
 def guess(text: str, history: list[dict], cards: list[dict]) -> tuple[str, float]:
     """Returns (speaker, confidence score). |score| >= CONFIDENT means trust it without the LLM."""
-    t = text.lower()
+    t = text.lower().replace("’", "'").replace("‘", "'")
     score = sum(w for rx, w in _CUES if rx.search(t))
     if echo_of_card(text, cards[-4:]) >= 0.35:
         score -= 3.0

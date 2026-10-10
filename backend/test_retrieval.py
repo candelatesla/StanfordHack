@@ -15,8 +15,8 @@ CASES = [
     ("If your platform causes us a breach, how much are you on the hook for?", "Liability and Indemnity", "1x"),
     ("Our data has to stay inside Europe for regulatory reasons.", "Data Residency", "Frankfurt"),
     ("What happens if your service goes down in the middle of the night?", "SLA and Support", "24/7"),
-    ("Can our people log in with Okta?", "Product Features", "SSO"),
-    ("Our auditors will want to see your security certification.", "SOC 2 and GDPR", "SOC 2 Type II"),
+    ("Can our people log in with Okta?", "Integrations|Product Features", "SSO"),
+    ("Our auditors will want to see your security certification.", "SOC 2 and GDPR|Security Overview", "SOC 2 Type II"),
 ]
 
 
@@ -30,7 +30,7 @@ async def main():
         hits = await retrieve(text, "", q, None)
         ms = (time.perf_counter() - t0) * 1000
         top = hits[0] if hits else {"title": None, "snippet": ""}
-        ok = top["title"] == title
+        ok = top["title"] in title.split("|")
         quoted = phrase.lower() in top["snippet"].lower()
         fails += not ok
         snippet_misses += ok and not quoted

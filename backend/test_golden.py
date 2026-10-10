@@ -42,9 +42,11 @@ def golden(ws):
     fresh(ws)
     turn = say(ws, "Hi, thanks for joining, how's your week?")
     print(f"auto speaker: {turn['speaker']:8} | {turn['text']}")
+    handled = set()
     for text, verdict, changes in LINES:
         turn = say(ws, text)
-        card = until(ws, settled)
+        card = until(ws, lambda e: settled(e) and e["id"] not in handled)  # skip late updates of old cards
+        handled.add(card["id"])
         print(f"auto speaker: {turn['speaker']:8} | {text}\n"
               f"  {card['verdict']:9} {card['latency_ms']:4}ms {card['path']}/{card['check']} | {card['request']}\n"
               f"   SAY: {card['counteroffer']}\n   SRC: {[(s['title'], s['match']) for s in card['sources']]}")

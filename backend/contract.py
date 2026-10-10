@@ -12,6 +12,11 @@ def clauses(deal: dict) -> dict[str, str]:
         "Limitation of Liability": f"{d['liability_cap_multiple']:g}x fees paid in prior 12 months",
         "HIPAA BAA": "Nimbus standard BAA attached as Exhibit C" if d["hipaa_baa"] else "Not included",
         "EU Data Residency": "Frankfurt region, +10% uplift" if d["eu_residency"] else "Not included",
+        "Implementation Fee": "Waived" if d["implementation_fee_waived"] else "$15,000 one-time",
+        "Renewal Price Cap": f"Increases capped at {d['renewal_cap_pct']:g}% per renewal",
+        "Start Date": f"{d['start_delay_days']} days after signature" if d["start_delay_days"] else "On signature",
+        "Pilot": f"Paid {d['pilot_days']}-day pilot, fee credited to contract" if d["pilot_days"] else "None",
+        "Additional Creator Seats": (f"{d['extra_creator_seats']} at $540/seat/yr" if d["extra_creator_seats"] else "None"),
     }
 
 

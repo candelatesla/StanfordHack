@@ -5,3 +5,5 @@ __pycache__/
 backend/crm.sqlite3
 node_modules/
 frontend/dist/
+backend/models/
+demo/customer_audio/cache/

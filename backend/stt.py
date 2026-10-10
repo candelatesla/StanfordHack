@@ -9,6 +9,7 @@ import asyncio
 import base64
 import io
 import json
+import time
 import wave
 from urllib.parse import urlencode
 from typing import Awaitable, Callable
@@ -31,6 +32,18 @@ class RealtimeSTT:
         self.ws = None
         self.reader: asyncio.Task | None = None
         self.dead = False
+        self.speech_since_msg = 0.0
+        self.unanswered_since = 0.0
+
+    # While someone is talking the server streams partial transcripts within ~0.5s, so speech that has
+    # gone unanswered this long means the socket is silently dead. (Silence alone proves nothing.)
+    STALL_MIN_SPEECH_S = 1.0
+    STALL_WAIT_S = 2.5
+
+    @property
+    def stalled(self) -> bool:
+        return (self.speech_since_msg >= self.STALL_MIN_SPEECH_S
+                and time.monotonic() - self.unanswered_since > self.STALL_WAIT_S)
 
     async def start(self):
         params = [("model_id", config.STT_REALTIME_MODEL), ("audio_format", "pcm_16000"),
@@ -38,12 +51,14 @@ class RealtimeSTT:
         params += [("keyterms", k) for k in config.STT_KEYTERMS]
         self.ws = await websockets.connect(f"{self.URL}?{urlencode(params)}",
                                            additional_headers={"xi-api-key": config.ELEVENLABS_API_KEY},
-                                           open_timeout=5)
+                                           open_timeout=5, ping_interval=5, ping_timeout=5)
+        self.speech_since_msg = 0.0
         self.reader = asyncio.create_task(self._read())
 
     async def _read(self):
         try:
             async for raw in self.ws:
+                self.speech_since_msg = 0.0
                 msg = json.loads(raw)
                 kind = msg.get("message_type") or msg.get("type", "")
                 text = (msg.get("text") or "").strip()
@@ -59,6 +74,11 @@ class RealtimeSTT:
             self.dead = True
 
     async def feed(self, pcm: bytes):
+        x = np.frombuffer(pcm, dtype=np.int16).astype(np.float32)
+        if len(x) and float(np.sqrt(np.mean(x ** 2))) > 500:
+            if self.speech_since_msg == 0:
+                self.unanswered_since = time.monotonic()
+            self.speech_since_msg += len(x) / SAMPLE_RATE
         await self.ws.send(json.dumps({"message_type": "input_audio_chunk",
                                        "audio_base_64": base64.b64encode(pcm).decode(),
                                        "commit": False, "sample_rate": SAMPLE_RATE}))
@@ -83,6 +103,7 @@ class BatchSTT:
     MAX_FRAMES = 150           # 15s hard cut
 
     dead = False  # batch never drops a connection; failures are per-utterance
+    stalled = False
 
     def __init__(self, on_text: OnText):
         self.on_text = on_text
@@ -163,23 +184,40 @@ async def _open(on_text: OnText):
 
 
 class ResilientSTT:
-    """Keeps transcription alive for the whole call: if the upstream STT socket dies, reopen it
-    (realtime first, then batch) on the next audio chunk instead of killing the browser's audio socket."""
+    """Keeps transcription alive for the whole call. If the upstream STT socket dies or silently stalls,
+    reopen it (realtime first, then batch) and replay the audio since the last finished sentence,
+    so nothing the customer said in the meantime is lost."""
+
+    REPLAY_CHUNKS = 200  # up to ~20s of 100ms chunks
 
     def __init__(self, on_text: OnText):
-        self.on_text = on_text
-        self.inner = None
         self.reconnects = 0
+        self.since_commit: list[bytes] = []
+        self._user_on_text = on_text
+        self.inner = None
+
+    async def on_text(self, text: str, is_final: bool):
+        if is_final:
+            self.since_commit.clear()
+        await self._user_on_text(text, is_final)
 
     async def start(self):
         self.inner = await _open(self.on_text)
 
     async def feed(self, pcm: bytes):
-        if self.inner.dead:
+        if self.inner.dead or self.inner.stalled:
             self.reconnects += 1
-            print(f"[stt] upstream lost; reconnect #{self.reconnects}")
+            why = "stalled" if not self.inner.dead else "lost"
+            print(f"[stt] upstream {why}; reconnect #{self.reconnects}, replaying {len(self.since_commit) / 10:.1f}s")
             await self.inner.close()
             self.inner = await _open(self.on_text)
+            for chunk in list(self.since_commit):
+                await self._send(chunk)
+        self.since_commit.append(pcm)
+        del self.since_commit[:-self.REPLAY_CHUNKS]
+        await self._send(pcm)
+
+    async def _send(self, pcm: bytes):
         try:
             await self.inner.feed(pcm)
         except Exception as e:

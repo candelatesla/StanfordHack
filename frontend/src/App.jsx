@@ -26,7 +26,9 @@ const initial = {
   lastChanged: [],
   summary: null,
   callEnded: false,
-  status: { llm: false, stt: false },
+  calibrating: false,
+  stats: { turns: 0, skipped: 0, llm_calls: 0, embed_calls: 0, voices: [] },
+  status: { llm: false, stt: false, voice: false },
 };
 
 function reducer(state, ev) {
@@ -40,6 +42,7 @@ function reducer(state, ev) {
         contract: ev.contract,
         contractDiff: ev.contract_diff || [],
         status: ev.status || state.status,
+        stats: ev.stats || initial.stats,
       };
     case "transcript":
       if (!ev.is_final) return { ...state, partial: { ...state.partial, [ev.speaker]: ev.text } };
@@ -51,7 +54,7 @@ function reducer(state, ev) {
     case "transcript_update":
       return {
         ...state,
-        transcript: state.transcript.map((t) => (t.id === ev.id ? { ...t, speaker: ev.speaker, auto: ev.auto } : t)),
+        transcript: state.transcript.map((t) => (t.id === ev.id ? { ...t, speaker: ev.speaker, auto: ev.auto, via: ev.via } : t)),
       };
     case "suggestion": {
       const exists = state.suggestions.some((s) => s.id === ev.id);
@@ -79,6 +82,12 @@ function reducer(state, ev) {
       return { ...state, escalations: { ...state.escalations, [ev.id]: ev } };
     case "summary":
       return { ...state, summary: ev, callEnded: true };
+    case "stats":
+      return { ...state, stats: ev };
+    case "calibrate_start":
+      return { ...state, calibrating: true };
+    case "calibrated":
+      return { ...state, calibrating: false };
     case "close_summary":
       return { ...state, summary: null };
     default:
@@ -149,6 +158,14 @@ export default function App() {
 
   const send = (msg) => events.current?.send(msg);
   const live = senders.length > 0;
+  const singleMic = senders.some((s) => s.speaker === "auto");
+  const calibrate = () => {
+    send({ type: "calibrate" });
+    dispatch({ type: "calibrate_start" });
+    setTimeout(() => dispatch({ type: "calibrated" }), 15000);
+  };
+  const st = state.stats;
+  const repKnown = (st.voices || []).some((v) => v.role === "rep");
   const listening = live && !paused && !state.callEnded;
 
   const sendTurn = (text) => {
@@ -244,6 +261,14 @@ export default function App() {
             {pill[1]}
           </span>
           {listening && <LevelMeters senders={senders} />}
+          <span className="pill subtle" title={`${st.turns} turns checked; ${st.skipped} were small talk or acknowledgements and cost nothing`}>
+            API {st.llm_calls} LLM · {st.embed_calls} embed · {st.skipped} free
+          </span>
+          {singleMic && state.status.voice && (
+            <span className="pill subtle" title="Voices heard on this call (single-mic voice identification)">
+              🎙 {(st.voices || []).length} voice{(st.voices || []).length === 1 ? "" : "s"}{repKnown ? " · rep known" : ""}
+            </span>
+          )}
           <span className="pill subtle" title="Model mode">
             {state.status.llm ? "Nebius LLM" : "Rules-only mode"}
           </span>
@@ -263,6 +288,12 @@ export default function App() {
           )}
           {live && !state.callEnded && (
             <>
+              {singleMic && state.status.voice && (
+                <button className="btn" onClick={calibrate} disabled={state.calibrating}
+                  title="Rep: click, then say one sentence. Your voice is remembered for the rest of the call.">
+                  {state.calibrating ? "Speak now…" : repKnown ? "Recalibrate" : "Calibrate my voice"}
+                </button>
+              )}
               <button className="btn" onClick={togglePause}>{paused ? "▶ Resume" : "❚❚ Pause"}</button>
               <button className="btn ghost" onClick={stopAudio} title="Release the mic / tab share">Stop audio</button>
             </>
@@ -276,6 +307,10 @@ export default function App() {
         </div>
       </header>
       {audioError && <div className="banner">{audioError}</div>}
+      {state.calibrating && <div className="banner info">Rep: say one sentence now so DealBrain learns your voice.</div>}
+      {singleMic && state.status.voice && !repKnown && !state.calibrating && !state.callEnded && (
+        <div className="banner info">Single-mic mode: click <b>Calibrate my voice</b> and say one sentence for the most reliable speaker detection.</div>
+      )}
 
       <main className="grid">
         <section className="panel">

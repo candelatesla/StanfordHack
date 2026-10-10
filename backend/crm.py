@@ -15,11 +15,18 @@ DEMO_DEAL = {
     "liability_cap_multiple": 1,
     "hipaa_baa": 0,
     "eu_residency": 0,
+    "implementation_fee_waived": 0,
+    "renewal_cap_pct": 7,
+    "pilot_days": 0,
+    "start_delay_days": 0,
+    "extra_creator_seats": 0,
     "stage": "Negotiation",
 }
 FIELDS = [k for k in DEMO_DEAL if k != "id"]
 EDITABLE = {"tier", "discount_pct", "term_years", "payment_terms_days", "liability_cap_multiple",
-            "hipaa_baa", "eu_residency", "stage"}
+            "hipaa_baa", "eu_residency", "stage", "implementation_fee_waived", "renewal_cap_pct", "pilot_days",
+            "start_delay_days", "extra_creator_seats"}
+BOOLS = ("hipaa_baa", "eu_residency", "implementation_fee_waived")
 
 
 def _conn():
@@ -30,10 +37,13 @@ def _conn():
 
 def init(reset: bool = False):
     with _conn() as c:
+        if reset:  # demo data only: recreate so schema changes apply
+            c.execute("DROP TABLE IF EXISTS deals")
         c.execute("""CREATE TABLE IF NOT EXISTS deals (
             id TEXT PRIMARY KEY, customer TEXT, tier TEXT, list_arr REAL, discount_pct REAL,
             term_years INTEGER, payment_terms_days INTEGER, liability_cap_multiple REAL,
-            hipaa_baa INTEGER, eu_residency INTEGER, stage TEXT)""")
+            hipaa_baa INTEGER, eu_residency INTEGER, implementation_fee_waived INTEGER, renewal_cap_pct REAL,
+            pilot_days INTEGER, start_delay_days INTEGER, extra_creator_seats INTEGER, stage TEXT)""")
         c.execute("""CREATE TABLE IF NOT EXISTS deal_log (
             ts DATETIME DEFAULT CURRENT_TIMESTAMP, deal_id TEXT, field TEXT, old TEXT, new TEXT)""")
         if reset:
@@ -46,8 +56,8 @@ def init(reset: bool = False):
 
 def _with_derived(row: dict) -> dict:
     d = dict(row)
-    d["hipaa_baa"] = bool(d["hipaa_baa"])
-    d["eu_residency"] = bool(d["eu_residency"])
+    for k in BOOLS:
+        d[k] = bool(d[k])
     d["list_arr"] = RULES["tiers"].get(d["tier"], {}).get("list_arr", d["list_arr"])
     uplift = 1 + RULES["compliance"]["eu_residency"]["uplift_pct"] / 100 if d["eu_residency"] else 1
     d["arr"] = round(d["list_arr"] * uplift * (1 - d["discount_pct"] / 100), 2)

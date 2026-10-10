@@ -8,7 +8,8 @@ from session import Session
 
 LABELS = {"tier": "Tier", "discount_pct": "Discount %", "term_years": "Term (years)", "payment_terms": "Payment terms",
           "liability_cap_multiple": "Liability cap (x fees)", "hipaa_baa": "HIPAA BAA", "eu_residency": "EU residency",
-          "arr": "ARR"}
+          "arr": "ARR", "implementation_fee_waived": "Implementation fee waived", "renewal_cap_pct": "Renewal cap %",
+          "pilot_days": "Pilot (days)", "start_delay_days": "Start delay (days)", "extra_creator_seats": "Extra creator seats"}
 
 
 async def build(session: Session) -> dict:

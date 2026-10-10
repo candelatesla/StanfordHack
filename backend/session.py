@@ -1,11 +1,13 @@
 """Single live-call session + event bus (one call at a time is plenty for the demo)."""
 import asyncio
 import itertools
+import uuid
 import time
 
 from fastapi import WebSocket
 
 import crm
+from voice import VoiceRoster
 
 
 class Session:
@@ -22,8 +24,12 @@ class Session:
         self.accepted: list[str] = []
         self.escalated: list[str] = []
         self.last_customer_turn: dict | None = None
+        self.roster = VoiceRoster()     # voices heard on this call (single-mic mode)
+        self.calibrate_until = 0.0      # next voiced turn before this time is the rep's calibration
+        self.stats = {"turns": 0, "skipped": 0, "llm_calls": 0, "embed_calls": 0}
         self._ids = itertools.count(1)
         self._turn_ids = itertools.count(1)
+        self.call_id = uuid.uuid4().hex  # late background work from a previous call is dropped
         self.started = time.time()
 
     def next_id(self) -> str:
@@ -45,10 +51,13 @@ class Session:
 
     def add_turn(self, speaker: str, text: str, auto: bool = False, confident: bool = True) -> dict:
         """auto: speaker was inferred (single mic / typed), not known from the audio source."""
-        turn = {"type": "transcript", "id": f"t{next(self._turn_ids)}", "speaker": speaker, "text": text,
+        turn = {"type": "transcript", "id": f"t{next(self._turn_ids)}", "call": self.call_id, "speaker": speaker, "text": text,
                 "is_final": True, "auto": auto, "confident": confident, "ts": time.time()}
         self.transcript.append(turn)
         return turn
+
+    def is_current(self, turn: dict) -> bool:
+        return turn.get("call") == self.call_id
 
     def turn(self, turn_id: str) -> dict | None:
         return next((t for t in self.transcript if t["id"] == turn_id), None)
@@ -59,8 +68,11 @@ class Session:
         if manual:
             turn["auto"], turn["confident"] = False, True
         if changed or manual:
-            await self.emit({"type": "transcript_update", "id": turn["id"], "speaker": speaker,
+            await self.emit({"type": "transcript_update", "id": turn["id"], "speaker": speaker, "via": turn.get("via"),
                              "auto": turn["auto"]})
+
+    async def emit_stats(self):
+        await self.emit({"type": "stats", **self.stats, "voices": self.roster.summary()})
 
     async def remove_card(self, sid: str):
         if self.suggestions.pop(sid, None) is not None:

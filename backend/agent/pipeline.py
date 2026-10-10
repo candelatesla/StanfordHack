@@ -13,7 +13,9 @@ from agent import rules
 from agent.llm import client
 from agent.respond import respond
 from agent.retrieve import embed_query, retrieve
-from agent.trigger import NUMERIC, heuristic, llm_extract
+from agent.gate import assess
+from agent.trigger import NUMERIC, llm_extract
+from brain.ingest import INDEX
 from session import Session
 
 MERGE_WINDOW_S = 3.0     # STT can split one ask across two committed turns
@@ -42,12 +44,13 @@ def describe_request(item: dict) -> str:
 
 def proposed_changes(verdict: dict) -> dict:
     allowed = dict(verdict.get("allowed") or {})
-    for k in ("hipaa_baa", "eu_residency"):
+    for k in ("hipaa_baa", "eu_residency", "implementation_fee_waived"):
         if k in allowed:
             allowed[k] = bool(allowed[k])
     return {k: v for k, v in allowed.items()
             if k in {"discount_pct", "term_years", "payment_terms_days", "liability_cap_multiple",
-                     "hipaa_baa", "eu_residency", "tier"}}
+                     "hipaa_baa", "eu_residency", "tier", "implementation_fee_waived", "renewal_cap_pct",
+                     "pilot_days", "start_delay_days", "extra_creator_seats"}}
 
 
 async def _await(task: asyncio.Task | None, timeout: float):
@@ -63,42 +66,65 @@ async def _await(task: asyncio.Task | None, timeout: float):
 
 
 async def process_turn(session: Session, turn: dict):
+    session.stats["turns"] += 1
+    try:
+        await _process_turn(session, turn)
+    finally:
+        if session.is_current(turn):
+            await session.emit_stats()
+
+
+async def _process_turn(session: Session, turn: dict):
     t0 = time.perf_counter()
     text = turn["text"]
-    context = [t for t in session.transcript if t["id"] != turn["id"]][-6:]
     maybe_customer = turn["speaker"] == "customer" or (turn["auto"] and not turn["confident"])
     if not maybe_customer:
         return
-    llm_task = asyncio.create_task(llm_extract(text, context)) if client else None
-    qvec_task = asyncio.create_task(embed_query(text))  # speculative: overlaps speaker/request detection
+
+    # 0. gate: is this turn worth any API call? (greetings, rapport, "sounds good" -> no)
+    prev = session.last_customer_turn
+    recent = prev if prev and time.time() - prev["ts"] < MERGE_WINDOW_S else None
+    ask_text, g = text, assess(text)
+    if not g["items"] and recent:
+        # a fragment like "...if we sign for 3 years" only makes sense joined to the previous turn
+        merged = assess(f"{recent['text']} {text}")
+        if merged["items"]:
+            ask_text, g = f"{recent['text']} {text}", merged
+    if not g["candidate"]:
+        session.stats["skipped"] += 1
+        print(f"[gate] skip ({g['why']}): {text!r}")
+        return
+    print(f"[gate] call ({g['why']}): {text!r}")
+
+    context = [t for t in session.transcript if t["id"] != turn["id"]][-6:]
+    llm_task = None
+    if client:
+        llm_task = asyncio.create_task(llm_extract(ask_text, context))
+        session.stats["llm_calls"] += 1
+    qvec_task = asyncio.create_task(embed_query(ask_text))  # speculative: overlaps speaker/request detection
+    if INDEX.vectors is not None:
+        session.stats["embed_calls"] += 1
 
     # 1. who is speaking (only unsure auto-detected turns wait on the LLM)
     if turn["auto"] and not turn["confident"] and llm_task:
         llm = await _await(llm_task, config.TRIGGER_TIMEOUT_S)
         if llm and llm["speaker"]:
+            session.roster.vote(turn.get("voice_id"), llm["speaker"], 1.5)  # teaches the voice its role
+            turn["via"] = "llm"
             await session.set_speaker(turn, llm["speaker"])
     if turn["speaker"] != "customer":
         return
 
     # 2. what are they asking for
-    prev = session.last_customer_turn
-    recent = prev if prev and time.time() - prev["ts"] < MERGE_WINDOW_S else None
     record = session.last_customer_turn = {"text": text, "ts": time.time(), "cards": []}
-    items, path, ask_text = heuristic(text)["items"], "fast", text
-    if not items and recent:
-        # a fragment like "...if we sign for 3 years" only makes sense joined to the previous turn
-        merged = f"{recent['text']} {text}"
-        if items := heuristic(merged)["items"]:
-            ask_text = merged
+    items, path = g["items"], "fast"
     if not items and llm_task:
         llm = await _await(llm_task, config.TRIGGER_TIMEOUT_S)
         items, path = (llm["items"] if llm else []), "llm"
     if not items:
-        print(f"[pipeline] no brain needed ({_ms(t0)}ms): {text!r}")
+        print(f"[pipeline] nothing to answer ({_ms(t0)}ms): {text!r}")
         return
     record["text"] = ask_text
-    if ask_text != text:
-        qvec_task = asyncio.create_task(embed_query(ask_text))
     t_trigger = _ms(t0)
     follow_up = recent["cards"] if recent else []
     dense_weight = 0.8 if len(items) == 1 else 0.4  # several asks: lean on each ask's own keywords
@@ -118,7 +144,7 @@ async def process_turn(session: Session, turn: dict):
     cards = await asyncio.gather(*(card_for(i) for i in items))
     record["cards"] = [c["id"] for c in cards]
 
-    # 3. LLM second opinion on fast-path cards
+    # 3. LLM second opinion on fast-path cards (same call that was started above, no extra cost)
     if path == "fast" and llm_task:
         llm = await _await(llm_task, 20)
         await _reconcile(session, turn, cards, llm, ask_text, qvec_task)
@@ -130,7 +156,7 @@ async def _upgrade_sources(session: Session, card: dict, text: str, qvec_task, d
     except Exception:
         return
     sources = await retrieve(text, card["item"]["query"], qvec_task, None, dense_weight=dense_weight)
-    if sources and session.suggestions.get(card["id"]) is card:
+    if sources and session.suggestions.get(card["id"]) is card and session.call_id == card.get("call"):
         card["sources"] = [{"title": s["title"], "snippet": s["snippet"], "match": s["match"]} for s in sources]
         await session.emit(card)
 
@@ -149,12 +175,16 @@ def _reusable_card(session: Session, item: dict, follow_up: list[str]) -> str | 
 
 
 async def _reconcile(session: Session, turn: dict, cards: list[dict], llm: dict | None, text: str, qvec_task):
+    if not session.is_current(turn):
+        return  # the call was reset while the LLM was thinking
     if llm is None:
         for c in cards:
             c["check"] = "rules"
             await session.emit(c)
         return
     if turn["auto"] and not turn["confident"] and llm["speaker"] == "rep":
+        session.roster.vote(turn.get("voice_id"), "rep", 1.5)
+        turn["via"] = "llm"
         await session.set_speaker(turn, "rep")
         for c in cards:
             if not c.get("resolution"):
@@ -165,7 +195,10 @@ async def _reconcile(session: Session, turn: dict, cards: list[dict], llm: dict 
         feat = item["request"].get("feature")
         if feat and any(c["item"]["request"].get("feature") == feat for c in cards if c not in unmatched):
             continue  # same ask listed twice
-        card = next((c for c in unmatched if feat and c["item"]["request"].get("feature") == feat), None)             or next((c for c in unmatched if c["category"] == item["category"]), None)
+        shared = [k for k in NUMERIC if item["request"].get(k) is not None]
+        card = (next((c for c in unmatched if feat and c["item"]["request"].get("feature") == feat), None)
+                or next((c for c in unmatched if any(c["item"]["request"].get(k) is not None for k in shared)), None)
+                or next((c for c in unmatched if c["category"] == item["category"]), None))
         if card is None:  # the LLM found an ask the keywords missed
             if item["category"] in {c["category"] for c in cards} and not feat:
                 continue
@@ -198,15 +231,18 @@ async def _reconcile(session: Session, turn: dict, cards: list[dict], llm: dict 
 async def _build_card(session: Session, sid: str, item: dict, text: str, turn_id: str, path: str,
                       t0: float, t_trigger: int | None, sources_coro, check: str | None = None) -> dict:
     t1 = time.perf_counter()
+    call = session.call_id
     deal = session.deal
     sources, verdict = await asyncio.gather(sources_coro, asyncio.to_thread(rules.check, item, deal))
     t_lookup = _ms(t1)
     brain_ms = _ms(t0)
     print(f"[pipeline] {path} path: trigger={t_trigger}ms retrieve+rules={t_lookup}ms "
           f"brain_total={brain_ms}ms verdict={verdict['verdict']} sources={[s['title'] for s in sources]}")
+    if session.call_id != call:
+        return {"id": sid, "sources": [], "call": call}  # reset while retrieving: drop silently
     old = session.suggestions.get(sid, {})
     card = {
-        "type": "suggestion", "id": sid, "turn_id": turn_id, "status": "streaming",
+        "type": "suggestion", "id": sid, "turn_id": turn_id, "call": call, "status": "streaming",
         "created": old.get("created", time.time()),
         "verdict": verdict["verdict"],
         "category": item["category"],
@@ -227,9 +263,13 @@ async def _build_card(session: Session, sid: str, item: dict, text: str, turn_id
     await session.emit(card)
 
     first_token_ms = None
+    if client:
+        session.stats["llm_calls"] += 1
     async for partial in respond(text, item, verdict, sources, deal):
         if first_token_ms is None:
             first_token_ms = _ms(t0)
+        if session.call_id != call:
+            return card
         card.update(partial)
         await session.emit(card)
     card["status"] = "done"

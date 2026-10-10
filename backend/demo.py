@@ -14,7 +14,7 @@ LINES = [
 AUDIO_DIR = config.ROOT.parent / "demo" / "customer_audio"
 
 
-REP_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # a second voice for single-mic tests
+REP_VOICE_ID = "TxGEqnHWrfWFTfGW9XjX"  # a clearly different second voice for single-mic tests
 
 
 async def tts(text: str, output_format: str = "mp3_44100_128", voice: str | None = None) -> bytes:
