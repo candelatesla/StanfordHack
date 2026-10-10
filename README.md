@@ -1,8 +1,17 @@
 # 🎯 CLOSER: Contextual Live-call Optimization for Sales, Engagement & Retrieval
 
-> 🏆 Hackathon Track 4: **Sales without "let me get back to you"**
-
 🌐 **Live app: https://closer-stanford-hack.replit.app/**
+
+> 🏆 Built at the **Future of Work Hackathon: Building from the Farm** @ Stanford University 🌲 #SFTechWeek
+> 📅 October 9–10, 2026
+
+> 🎯 **Track 4: Sales Without "Let Me Get Back to You"**
+>
+> High-value B2B deals ($100k+ ARR) stall the moment a customer asks for custom terms, compliance exceptions, or
+> non-standard pricing. How can you unify pricing models, legal guardrails, and product capabilities scattered across
+> enterprise tools into a single vectorized "Company Brain" that can be queried in sub-500ms during a live
+> conversation? Can that voice agent listen to a live sales call, evaluate customer demands against that Company
+> Brain in real time, negotiate trade-offs within pre-approved limits, and update the CRM/contract on the fly?
 
 A live sales copilot 🎧 that listens to a call, works out who is speaking, stays quiet through greetings and small
 talk, and when the customer asks for something or raises a concern it checks the Company Brain 🧠 (docs +
@@ -83,7 +92,6 @@ the WebSockets on one port.
 - 🤫 **No API calls on small talk.** A free local gate sits in front of every LLM and embedding call: faster and cheaper.
 - 🧬 **Speaker ID by voice, not keywords.** Voiceprints run locally on CPU; in call-tab mode, the audio source decides
   (and rep-mic echo of the customer is dropped).
-- 🔌 **Degrades gracefully.** No keys? Regex extractor, BM25 search, template answers and typed turns still work.
 - 🎤 **One permission prompt.** Mic/tab access is asked once per page session; Pause, End and New call reuse the streams.
 
 ---
@@ -93,7 +101,7 @@ the WebSockets on one port.
 | Sponsor | What we use | Where |
 |---|---|---|
 | 🟢 **Nebius** | `openai/gpt-oss-120b` (`reasoning_effort=low`, ~400–500ms) to extract asks, verify speakers, write answer cards and the post-call summary; `Qwen/Qwen3-Embedding-8B` (auto-picked) for semantic search over the Company Brain | `agent/trigger.py`, `agent/respond.py`, `summary.py`, `agent/retrieve.py` |
-| 🔊 **ElevenLabs** | Scribe v2 **realtime** speech-to-text for the live call (with batch Scribe fallback); text-to-speech voices for the `/customer` soundboard and our end-to-end audio tests | `stt.py`, `tools/test_audio.py`, `demo/` |
+| 🔊 **ElevenLabs** | Scribe v2 **realtime** speech-to-text for the live call (with batch Scribe fallback); text-to-speech voices for simulated customer calls in our end-to-end audio tests | `stt.py`, `tools/test_audio.py`, `demo/` |
 | ☁️ **Replit** | Hosting: one always-on VM runs the whole app (UI + API + WebSockets on one port) at https://closer-stanford-hack.replit.app/ | `.replit`, `start.sh` |
 
 ### 🧰 Models at a glance
@@ -101,7 +109,7 @@ the WebSockets on one port.
 | Role | Model | Notes |
 |---|---|---|
 | 🧠 Understand / verify | `openai/gpt-oss-120b` (Nebius) | only on turns that pass the gate |
-| 💬 Answer cards + summary | `openai/gpt-oss-120b` (`SMART_MODEL`, Nebius) | any model from `tools/check_keys.py`'s list works |
+| 💬 Answer cards + summary | `openai/gpt-oss-120b` (`SMART_MODEL`, Nebius) | streamed, grounded in the rule verdict and sources |
 | 📚 Embeddings | `Qwen/Qwen3-Embedding-8B` (Nebius, auto-picked) | only on turns that pass the gate |
 | 🧬 Voiceprints | WeSpeaker ResNet34 (local, sherpa-onnx) | no API call |
 | 🗣️ Speech-to-text | ElevenLabs Scribe v2 realtime | streaming, auto-reconnect |
@@ -124,19 +132,13 @@ procurement, company overview, and objection talk tracks (price, competitor, tim
 
 ---
 
-## 🎬 Demo pages
-
-- 🧑‍💼 `/` : the rep's copilot. On the pre-call screen, pick an existing customer (with their CRM history) or create
-  a new one, then **Start call**. Pick **Call tab + mic** (tab = customer, mic = rep; works with Google Meet) or
-  **Single mic (in person)** (one mic hears both people; speakers identified by voice), then **Start listening** once. The
-  browser asks for access a single time; Pause/Resume, End call and New call reuse the same streams. In mic-only
-  mode, click **Calibrate my voice** and say one sentence for the most reliable speaker labels.
-- 🎛️ `/customer` : soundboard for a second laptop. Plays scripted customer lines as ElevenLabs TTS, or sends them as text.
-
 ## 🚀 Run locally
 
+<details>
+<summary>Setup commands</summary>
+
 ```bash
-cp .env.example .env            # 🔑 keys optional: no keys = rules-only text mode
+cp .env.example .env            # 🔑 add your API keys
 # backend
 cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # (bin/ on mac/linux)
 .venv/Scripts/python ../tools/get_voice_model.py   # 26.5 MB speaker-recognition model (one time)
@@ -149,7 +151,12 @@ cd frontend && npm install && npm run dev      # http://localhost:5173
 📦 Single-port mode (also what Replit runs): `bash start.sh` → http://localhost:8000
 🩺 Health check: `/api/health` shows whether the LLM, STT, hybrid search and voice model are enabled.
 
+</details>
+
 ## 🧪 Evaluation
+
+<details>
+<summary>Test and eval scripts</summary>
 
 | Command (from repo root) | Needs | What it checks |
 |---|---|---|
@@ -159,6 +166,8 @@ cd frontend && npm install && npm run dev      # http://localhost:5173
 | `cd backend && .venv/Scripts/python test_trigger.py` | nothing | instant extractor + wording-based speaker cues |
 | `cd backend && .venv/Scripts/python test_retrieval.py` | Nebius key for hybrid | paraphrased questions → right doc |
 | `backend/.venv/Scripts/python tools/check_keys.py` | keys | lists Nebius models, times them; tests TTS + batch + realtime STT |
+
+</details>
 
 ---
 
