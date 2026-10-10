@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+backend/crm.sqlite3
+node_modules/
+frontend/dist/

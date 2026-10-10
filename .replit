@@ -1,0 +1,6 @@
+run = "bash start.sh"
+entrypoint = "backend/main.py"
+
+[[ports]]
+localPort = 8000
+externalPort = 80
