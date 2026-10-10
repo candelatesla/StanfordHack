@@ -62,7 +62,7 @@ export default function Setup({ initialAccount, onStart }) {
     <div className="setup">
       <header className="topbar">
         <div className="brand">
-          <span className="logo">◆</span> DealBrain <span className="crumb">Before the call</span>
+          <span className="logo">◆</span> CLOSER <span className="crumb">Before the call</span>
         </div>
       </header>
       {error && <div className="banner">{error}</div>}

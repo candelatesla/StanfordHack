@@ -1,4 +1,4 @@
-"""DealBrain backend: FastAPI + WebSockets.
+"""CLOSER backend: FastAPI + WebSockets.
 
   WS /ws/events          UI <-> backend events (transcript, suggestion, deal_update, escalation, summary)
   WS /ws/audio?speaker=  16kHz mono PCM16 from the browser (customer = tab audio, rep = mic)
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="DealBrain", lifespan=lifespan)
+app = FastAPI(title="CLOSER", lifespan=lifespan)
 
 
 def status() -> dict:

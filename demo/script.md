@@ -1,8 +1,8 @@
 # Golden Demo Script — Nimbus Analytics × Acme Health
 
-Roles: **Driver** (runs DealBrain on the rep laptop), **Customer** (second laptop in the Meet, plays TTS or reads lines), **Presenter**.
+Roles: **Driver** (runs CLOSER on the rep laptop), **Customer** (second laptop in the Meet, plays TTS or reads lines), **Presenter**.
 
-Setup: rep laptop opens the Meet tab + DealBrain tab → **Start listening** → pick the Meet tab, tick **"Also share tab audio"** → allow mic. Click ↺ to reset the deal first.
+Setup: rep laptop opens the Meet tab + CLOSER tab → **Start listening** → pick the Meet tab, tick **"Also share tab audio"** → allow mic. Click ↺ to reset the deal first.
 
 | # | Customer says | Expected card | Rep action |
 |---|---|---|---|

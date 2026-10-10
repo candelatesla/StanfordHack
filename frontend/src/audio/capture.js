@@ -31,7 +31,7 @@ export async function openDevices(mode) {
   let tab;
   try {
     // User picks the Meet tab and ticks "Also share tab audio".
-    // Hints (Chrome/Edge): open the picker on "Chrome Tab", tab audio on, hide DealBrain's own tab.
+    // Hints (Chrome/Edge): open the picker on "Chrome Tab", tab audio on, hide CLOSER's own tab.
     tab = await navigator.mediaDevices.getDisplayMedia({
       video: { displaySurface: "browser" },
       audio: { echoCancellation: false, noiseSuppression: false },

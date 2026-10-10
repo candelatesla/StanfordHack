@@ -1,4 +1,4 @@
-# DealBrain — notes for Claude sessions
+# CLOSER — notes for Claude sessions
 
 Hackathon project (Track 4: "Sales without 'let me get back to you'"). A live sales copilot: listens to a call,
 identifies who is speaking, ignores small talk, and when the customer asks for something or raises a concern it

@@ -267,7 +267,7 @@ export default function App() {
   if (screen !== "call") {
     return screen === "setup"
       ? <Setup initialAccount={deal?.account_id} onStart={startCall} />
-      : <div className="empty center">Connecting to DealBrain…</div>;
+      : <div className="empty center">Connecting to CLOSER…</div>;
   }
 
   return (
@@ -277,7 +277,7 @@ export default function App() {
           {(!listening || state.callEnded) && (
             <button className="btn ghost sm" onClick={backToAccounts} title="Back to the customer's page">←</button>
           )}
-          <span className="logo">◆</span> DealBrain
+          <span className="logo">◆</span> CLOSER
           <span className="crumb">Nimbus × {deal?.customer || "…"}{deal?.name ? ` · ${deal.name}` : ""}</span>
         </div>
         <div className="topbar-right">
@@ -332,7 +332,7 @@ export default function App() {
         </div>
       </header>
       {audioError && <div className="banner">{audioError}</div>}
-      {state.calibrating && <div className="banner info">Rep: say one sentence now so DealBrain learns your voice.</div>}
+      {state.calibrating && <div className="banner info">Rep: say one sentence now so CLOSER learns your voice.</div>}
       {tabMode && st.echoes > 0 && !state.callEnded && (
         <div className="banner info">
           Your mic is picking up the customer from your speakers ({st.echoes} echo{st.echoes === 1 ? "" : "es"} filtered). <b>Wear headphones</b> for clean speaker labels.
