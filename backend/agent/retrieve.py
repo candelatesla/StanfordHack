@@ -1,40 +1,86 @@
-"""Vector search over the in-memory Company Brain index (keyword fallback without a key)."""
+"""Hybrid retrieval: the whole utterance (dense) + its keywords (BM25), fused per sentence, rolled up
+to paragraphs. The card quotes the best-matching sentences, not a whole doc."""
+import asyncio
+import time
+
 import numpy as np
 
+from agent.llm import client
 from brain.ingest import INDEX, embed, tokens
 
-_query_cache: dict[str, np.ndarray] = {}
+DENSE_WEIGHT = 0.8  # tuned on test_retrieval.py paraphrases: 0.6 -> 5/8, 0.8 -> 7/8 docs
+K1, B = 1.2, 0.75
+_cache: dict[str, np.ndarray] = {}
 
 
-async def warm_queries(queries: list[str]):
-    """Pre-embed the fast-path queries so their lookups skip the embedding round-trip (~400ms)."""
-    if INDEX.vectors is None or not queries:
-        return
-    for q, v in zip(queries, await embed(queries)):
-        _query_cache[q] = v
-
-
-async def retrieve(query: str, k: int = 3) -> list[dict]:
-    if not INDEX.chunks:
-        return []
-    if INDEX.vectors is not None:
+async def embed_query(text: str) -> np.ndarray | None:
+    """Start this as soon as a turn arrives; retrieval awaits it within its latency budget."""
+    if client is None or INDEX.vectors is None:
+        return None
+    if text not in _cache:
         try:
-            q = _query_cache.get(query)
-            if q is None:
-                q = (await embed([query]))[0]
-            return _top(INDEX.vectors @ q, k)
+            _cache[text] = (await embed([text]))[0]
         except Exception as e:
-            print(f"[retrieve] embedding query failed, keyword fallback: {e}")
-    q_tokens = set(tokens(query))
-    scores = np.array([sum(INDEX.idf.get(t, 0) * min(bag[t], 2) for t in q_tokens) for bag in INDEX.bow])
-    return _top(scores, k)
+            print(f"[retrieve] query embedding failed: {e}")
+            return None
+    return _cache[text]
 
 
-def _top(scores: np.ndarray, k: int) -> list[dict]:
+def bm25(query: str) -> np.ndarray:
+    q = set(tokens(query))
+    scores = np.zeros(len(INDEX.bags), dtype=np.float32)
+    for i, bag in enumerate(INDEX.bags):
+        dl = sum(bag.values())
+        for t in q:
+            f = bag.get(t, 0)
+            if f:
+                scores[i] += INDEX.idf[t] * f * (K1 + 1) / (f + K1 * (1 - B + B * dl / INDEX.avg_len))
+    return scores
+
+
+def _norm(x: np.ndarray) -> np.ndarray:
+    lo, hi = float(x.min()), float(x.max())
+    return (x - lo) / (hi - lo) if hi > lo else np.zeros_like(x)
+
+
+async def retrieve(text: str, keywords: str = "", qvec_task: asyncio.Task | None = None,
+                   deadline: float | None = None, k: int = 2, dense_weight: float = DENSE_WEIGHT) -> list[dict]:
+    """text: what the customer said (merged with context when it was a fragment).
+    keywords: category hint from the extractor (steers the sparse side).
+    qvec_task: in-flight embed_query(text); used if it lands before `deadline` (perf_counter)."""
+    if not INDEX.sentences:
+        return []
+    sparse = np.sqrt(bm25(f"{text} {keywords}"))  # damp single generic-word matches
+    qvec = None
+    if qvec_task is not None:
+        try:
+            wait = None if deadline is None else max(0.0, deadline - time.perf_counter())
+            qvec = await asyncio.wait_for(asyncio.shield(qvec_task), wait)
+        except (asyncio.TimeoutError, Exception):
+            qvec = None
+    if qvec is not None:
+        dense = INDEX.vectors @ qvec
+        fused = dense_weight * _norm(dense) + (1 - dense_weight) * _norm(sparse)
+        mode = "hybrid"
+    else:
+        fused, mode = _norm(sparse), "keyword"
+    if fused.max() <= 0:
+        return []
+
+    # paragraph score = best sentence + a little credit for a second supporting sentence
+    by_chunk: dict[int, list[int]] = {}
+    for i in np.argsort(-fused):
+        by_chunk.setdefault(INDEX.sentences[i].chunk, []).append(int(i))
+    ranked = sorted(by_chunk.items(),
+                    key=lambda kv: -(fused[kv[1][0]] + 0.25 * (fused[kv[1][1]] if len(kv[1]) > 1 else 0)))
+    top_score = fused[ranked[0][1][0]]
     out = []
-    for i in np.argsort(-scores)[:k]:
-        if scores[i] <= 0:
-            continue
-        c = INDEX.chunks[i]
-        out.append({"title": c.title, "file": c.file, "snippet": c.text, "score": round(float(scores[i]), 3)})
+    for chunk_idx, sent_ids in ranked[:k]:
+        score = float(fused[sent_ids[0]])
+        if score < 0.8 * top_score:
+            break
+        best = sorted(sent_ids[:2])  # the paragraph's two best sentences, in document order
+        c = INDEX.chunks[chunk_idx]
+        out.append({"title": c.title, "file": c.file, "snippet": " ".join(INDEX.sentences[i].text for i in best),
+                    "score": round(score, 3), "match": mode})
     return out

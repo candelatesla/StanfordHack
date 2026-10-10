@@ -160,3 +160,17 @@ ins { color: #4ade80; text-decoration: none; font-weight: 600; }
 .soundboard .actions { display: flex; gap: 6px; }
 .check { font-size: 11px; font-weight: 600; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 .check.revised { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+
+/* speaker labels: auto-detected, click to correct */
+.turn .who { background: none; border: 0; padding: 0; font: inherit; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.turn.rep .who { align-self: flex-end; }
+.turn .who:hover { color: var(--text); }
+.turn.customer .who { color: #a5b4fc; }
+.auto-tag { font-size: 9px; letter-spacing: .04em; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; color: var(--muted); text-transform: lowercase; }
+.start-group { display: inline-flex; gap: 6px; }
+.start-group select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; }
+.check.kept, .check.rules { color: var(--muted); }
+.source .match { font-size: 10px; opacity: .7; margin-left: 4px; }
+.sources { flex-direction: column; align-items: flex-start; }
+.source-row { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.snippet { margin: 0; padding: 6px 10px; border-left: 2px solid var(--border); color: var(--muted); font-size: 12.5px; line-height: 1.45; }

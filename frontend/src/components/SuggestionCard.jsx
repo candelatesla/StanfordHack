@@ -12,7 +12,7 @@ export default function SuggestionCard({ s, escalation, onAccept, onEscalate }) 
         <span className="request">{s.request}</span>
         {s.check && (
           <span className={`check ${s.check}`} title={CHECK_TITLE[s.check]}>
-            {s.check === "revised" ? "↻ revised" : "✓ LLM"}
+            {CHECK_LABEL[s.check] || s.check}
           </span>
         )}
         <span className={`latency ${fast ? "fast" : "slow"}`} title={timingTitle(s.timing)}>
@@ -29,8 +29,13 @@ export default function SuggestionCard({ s, escalation, onAccept, onEscalate }) 
       )}
       {s.sources?.length > 0 && (
         <div className="sources">
-          {dedupe(s.sources).map((src) => (
-            <span key={src.title} className="source" title={src.snippet}>📄 {src.title}</span>
+          {dedupe(s.sources).map((src, i) => (
+            <div key={src.title} className="source-row">
+              <span className="source" title={MATCH_TITLE[src.match]}>
+                📄 {src.title}<span className="match">{src.match}</span>
+              </span>
+              {i === 0 && <blockquote className="snippet">{src.snippet}</blockquote>}
+            </div>
           ))}
         </div>
       )}
@@ -60,9 +65,16 @@ export default function SuggestionCard({ s, escalation, onAccept, onEscalate }) 
 }
 
 const CHECK_TITLE = {
-  verified: "Instant rules-path extraction, confirmed by the LLM",
-  revised: "LLM corrected the instant extraction; card recomputed",
-  llm: "Extracted by the LLM (phrasing not covered by the fast path)",
+  verified: "Instant extraction, confirmed by the LLM reading the whole sentence in context",
+  revised: "The LLM read the sentence differently; card recomputed",
+  llm: "Extracted by the LLM (phrasing the instant extractor doesn't cover)",
+  kept: "Keyword match the LLM didn't list; kept so nothing is missed",
+  rules: "Instant extraction (LLM unavailable)",
+};
+const CHECK_LABEL = { verified: "✓ LLM", revised: "↻ revised", llm: "✓ LLM", kept: "keyword", rules: "rules" };
+const MATCH_TITLE = {
+  hybrid: "Matched on meaning (embedding of the whole utterance) + keywords (BM25)",
+  keyword: "Matched on keywords (BM25); meaning-based match still loading or unavailable",
 };
 const dedupe =(xs) => xs.filter((x, i) => xs.findIndex((y) => y.title === x.title) === i);
 const fmt = (v) => (v === true ? "yes" : v === false ? "no" : v);

@@ -18,9 +18,8 @@ import demo
 import stt
 import summary
 from agent.llm import warmup
-from agent.pipeline import on_final_customer_turn
-from agent.retrieve import warm_queries
-from agent.trigger import FAST_QUERIES
+from agent import speaker as speaker_id
+from agent.pipeline import process_turn
 from brain.ingest import INDEX, build_index
 from session import SESSION
 
@@ -40,7 +39,6 @@ async def lifespan(app: FastAPI):
     crm.init()
     SESSION.reset()
     await build_index()
-    await warm_queries(list(FAST_QUERIES.values()))
     if config.LLM_ENABLED:
         await warmup()
     print(f"[startup] LLM {'enabled: ' + config.FAST_MODEL + ' / ' + config.SMART_MODEL if config.LLM_ENABLED else 'disabled (heuristic mode)'}")
@@ -60,7 +58,8 @@ def deal_snapshot() -> dict:
 @app.get("/api/health")
 async def health():
     return {"ok": True, "llm": config.LLM_ENABLED, "stt": bool(config.ELEVENLABS_API_KEY),
-            "index": "embeddings" if INDEX.vectors is not None else "keyword", "chunks": len(INDEX.chunks)}
+            "index": "hybrid" if INDEX.vectors is not None else "bm25", "chunks": len(INDEX.chunks),
+            "sentences": len(INDEX.sentences)}
 
 
 @app.get("/api/deal")
@@ -68,11 +67,34 @@ async def get_deal():
     return deal_snapshot()
 
 
-async def handle_customer_or_rep_turn(speaker: str, text: str):
-    turn = SESSION.add_turn(speaker, text)
+async def handle_turn(speaker: str, text: str):
+    """speaker: "customer"/"rep" when the audio source tells us (Meet tab / rep mic), else "auto"."""
+    if speaker == "auto":
+        guess, score = speaker_id.guess(text, SESSION.transcript[-6:], list(SESSION.suggestions.values()))
+        confident = score >= speaker_id.CONFIDENT or not config.LLM_ENABLED
+        turn = SESSION.add_turn(guess, text, auto=True, confident=confident)
+    else:
+        if speaker == "rep" and SESSION.is_echo(text):
+            print(f"[turn] dropped rep-mic echo of customer audio: {text!r}")
+            return
+        turn = SESSION.add_turn(speaker, text)
     await SESSION.emit(turn)
-    if speaker == "customer":
-        spawn(on_final_customer_turn(SESSION, text))
+    spawn(process_turn(SESSION, turn))
+
+
+async def set_speaker(turn_id: str, speaker: str):
+    """Manual correction from the UI (click the speaker label)."""
+    turn = SESSION.turn(turn_id)
+    if not turn or speaker not in ("customer", "rep"):
+        return
+    was = turn["speaker"]
+    await SESSION.set_speaker(turn, speaker, manual=True)
+    if speaker == "rep" and was == "customer":
+        for sid, card in list(SESSION.suggestions.items()):
+            if card.get("turn_id") == turn_id and not card.get("resolution"):
+                await SESSION.remove_card(sid)
+    elif speaker == "customer" and was == "rep":
+        spawn(process_turn(SESSION, turn))
 
 
 async def accept(sid: str):
@@ -113,7 +135,9 @@ async def ws_events(ws: WebSocket):
             if kind == "text_turn":
                 text = (msg.get("text") or "").strip()
                 if text:
-                    await handle_customer_or_rep_turn(msg.get("speaker", "customer"), text)
+                    await handle_turn(msg.get("speaker", "auto"), text)
+            elif kind == "set_speaker":
+                await set_speaker(msg.get("id"), msg.get("speaker"))
             elif kind == "accept":
                 await accept(msg["id"])
             elif kind == "escalate":
@@ -131,7 +155,7 @@ async def ws_events(ws: WebSocket):
 
 
 @app.websocket("/ws/audio")
-async def ws_audio(ws: WebSocket, speaker: str = "customer"):
+async def ws_audio(ws: WebSocket, speaker: str = "auto"):
     await ws.accept()
     if not config.ELEVENLABS_API_KEY:
         await ws.close(code=1011, reason="ELEVENLABS_API_KEY not set")
@@ -139,7 +163,7 @@ async def ws_audio(ws: WebSocket, speaker: str = "customer"):
 
     async def on_text(text: str, is_final: bool):
         if is_final:
-            await handle_customer_or_rep_turn(speaker, text)
+            await handle_turn(speaker, text)
         else:
             await SESSION.emit({"type": "transcript", "speaker": speaker, "text": text,
                                 "is_final": False, "ts": time.time()})
@@ -151,6 +175,8 @@ async def ws_audio(ws: WebSocket, speaker: str = "customer"):
             await stream.feed(pcm)
     except (WebSocketDisconnect, RuntimeError):
         pass
+    except Exception as e:
+        print(f"[audio] {speaker} socket error: {e!r}")
     finally:
         await stream.close()
 

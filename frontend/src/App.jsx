@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { connectEvents } from "./ws.js";
-import { getCustomerStream, getRepStream, streamToBackend } from "./audio/capture.js";
+import { MODES, createSender, openDevices } from "./audio/capture.js";
 import Transcript from "./components/Transcript.jsx";
 import SuggestionCard from "./components/SuggestionCard.jsx";
 import DealPanel from "./components/DealPanel.jsx";
@@ -12,6 +12,7 @@ const GOLDEN = [
   "We're in healthcare. Do you sign a HIPAA BAA?",
   "We need net-60 payment terms.",
   "Can you raise the liability cap to 3x fees?",
+  "We'd need net 60, and does that include a HIPAA BAA?",
 ];
 
 const initial = {
@@ -24,6 +25,7 @@ const initial = {
   contractDiff: [],
   lastChanged: [],
   summary: null,
+  callEnded: false,
   status: { llm: false, stt: false },
 };
 
@@ -44,7 +46,12 @@ function reducer(state, ev) {
       return {
         ...state,
         transcript: [...state.transcript, ev],
-        partial: { ...state.partial, [ev.speaker]: null },
+        partial: ev.auto ? {} : { ...state.partial, [ev.speaker]: null },
+      };
+    case "transcript_update":
+      return {
+        ...state,
+        transcript: state.transcript.map((t) => (t.id === ev.id ? { ...t, speaker: ev.speaker, auto: ev.auto } : t)),
       };
     case "suggestion": {
       const exists = state.suggestions.some((s) => s.id === ev.id);
@@ -53,6 +60,8 @@ function reducer(state, ev) {
         : [...state.suggestions, ev];
       return { ...state, suggestions };
     }
+    case "suggestion_removed":
+      return { ...state, suggestions: state.suggestions.filter((s) => s.id !== ev.id) };
     case "suggestion_resolved":
       return {
         ...state,
@@ -69,7 +78,7 @@ function reducer(state, ev) {
     case "escalation":
       return { ...state, escalations: { ...state.escalations, [ev.id]: ev } };
     case "summary":
-      return { ...state, summary: ev };
+      return { ...state, summary: ev, callEnded: true };
     case "close_summary":
       return { ...state, summary: null };
     default:
@@ -77,22 +86,23 @@ function reducer(state, ev) {
   }
 }
 
-function LevelMeters({ sources }) {
-  const [levels, setLevels] = useState([0, 0]);
+function LevelMeters({ senders }) {
+  const [levels, setLevels] = useState([]);
   useEffect(() => {
     let raf;
     const tick = () => {
-      setLevels(sources.map((s) => s.level()));
+      setLevels(senders.map((s) => s.level()));
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [sources]);
+  }, [senders]);
+  const label = { customer: "Customer", rep: "Rep", auto: "Mic" };
   return (
     <span className="meters" title="Audio input levels">
-      {["Customer", "Rep"].map((label, i) => (
-        <span key={label} className="meter">
-          {label}
+      {senders.map((s, i) => (
+        <span key={s.speaker} className="meter">
+          {label[s.speaker]}
           <span className="meter-bar"><span style={{ width: `${Math.min(100, (levels[i] || 0) * 250)}%` }} /></span>
         </span>
       ))}
@@ -100,72 +110,126 @@ function LevelMeters({ sources }) {
   );
 }
 
+const loadMode = () => {
+  try {
+    return localStorage.getItem("dealbrain.mode") || "mic";
+  } catch {
+    return "mic";
+  }
+};
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initial);
   const [conn, setConn] = useState("connecting");
-  const [listening, setListening] = useState(false);
+  const [mode, setMode] = useState(loadMode);
+  const [senders, setSenders] = useState([]); // open for the whole page session once started
+  const [paused, setPaused] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [audioStatus, setAudioStatus] = useState("");
   const [audioError, setAudioError] = useState("");
   const [draft, setDraft] = useState("");
-  const [speaker, setSpeaker] = useState("customer");
   const events = useRef(null);
-  const audio = useRef([]);
   const feedEnd = useRef(null);
 
   useEffect(() => {
     events.current = connectEvents(dispatch, setConn);
-    return () => events.current.close();
+    const release = () => sendersRef.current.forEach((s) => s.close());
+    window.addEventListener("beforeunload", release);
+    return () => {
+      window.removeEventListener("beforeunload", release);
+      events.current.close();
+    };
   }, []);
+  const sendersRef = useRef([]);
+  sendersRef.current = senders;
 
   useEffect(() => {
     feedEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.suggestions.length]);
 
   const send = (msg) => events.current?.send(msg);
+  const live = senders.length > 0;
+  const listening = live && !paused && !state.callEnded;
 
-  const sendTurn = (text, who = speaker) => {
+  const sendTurn = (text) => {
     if (!text.trim()) return;
-    send({ type: "text_turn", speaker: who, text });
+    send({ type: "text_turn", speaker: "auto", text });
     setDraft("");
   };
 
-  const startListening = async () => {
-    setAudioError("");
+  const chooseMode = (m) => {
+    setMode(m);
     try {
-      const customer = await getCustomerStream();
-      const rep = await getRepStream();
-      const onClose = (reason) => {
-        setAudioError(reason);
-        stopListening();
-      };
-      audio.current = [
-        await streamToBackend(customer, "customer", onClose),
-        await streamToBackend(rep, "rep", onClose),
-      ];
-      setListening(true);
-    } catch (e) {
-      setAudioError(e.message || String(e));
-      stopListening();
+      localStorage.setItem("dealbrain.mode", m);
+    } catch {
+      /* private mode: just don't remember */
     }
   };
 
-  const stopListening = () => {
-    audio.current.forEach((a) => a.stop());
-    audio.current = [];
-    setListening(false);
+  // Asks for devices exactly once; everything after this is pause/resume on the same streams.
+  const start = async () => {
+    setAudioError("");
+    setStarting(true);
+    try {
+      const devices = await openDevices(mode);
+      const made = await Promise.all(
+        devices.map(({ speaker, stream }) =>
+          createSender(stream, speaker, {
+            onStatus: (s, reason) => {
+              setAudioStatus(s);
+              if (s === "error") setAudioError(reason);
+            },
+            onEnded: (sp) =>
+              setAudioError(`${sp === "customer" ? "Tab sharing" : "Microphone"} stopped. Click "Stop audio" then start again.`),
+          })
+        )
+      );
+      setSenders(made);
+      setPaused(false);
+    } catch (e) {
+      setAudioError(e.name === "NotAllowedError" ? "Permission denied. Allow the mic (and tab share) to listen." : e.message || String(e));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const togglePause = () => {
+    const p = !paused;
+    senders.forEach((s) => s.setPaused(p));
+    setPaused(p);
+  };
+
+  // Fully releases devices (the browser will ask again next time).
+  const stopAudio = () => {
+    senders.forEach((s) => s.close());
+    setSenders([]);
+    setPaused(false);
+    setAudioStatus("");
   };
 
   const endCall = () => {
-    stopListening();
+    if (state.callEnded) return;
+    senders.forEach((s) => s.setPaused(true));
     send({ type: "end_call" });
   };
 
-  const reset = () => {
-    stopListening();
+  const newCall = () => {
     send({ type: "reset" });
+    senders.forEach((s) => s.setPaused(false));
+    setPaused(false);
   };
 
   const deal = state.deal;
   const pending = state.suggestions.filter((s) => !s.resolution).length;
+  const pill = state.callEnded
+    ? ["subtle", "Call ended"]
+    : listening
+      ? [audioStatus === "reconnecting" ? "warn" : "live", audioStatus === "reconnecting" ? "Reconnecting audio" : "Listening"]
+      : live
+        ? ["warn", "Paused"]
+        : conn === "connected"
+          ? ["ok", "Ready"]
+          : ["warn", "Reconnecting"];
 
   return (
     <div className="app">
@@ -175,46 +239,65 @@ export default function App() {
           <span className="crumb">Nimbus × {deal?.customer || "…"}</span>
         </div>
         <div className="topbar-right">
-          <span className={`pill ${listening ? "live" : conn === "connected" ? "ok" : "warn"}`}>
+          <span className={`pill ${pill[0]}`}>
             <span className="dot" />
-            {listening ? "Listening" : conn === "connected" ? "Ready" : "Reconnecting"}
+            {pill[1]}
           </span>
-          {listening && <LevelMeters sources={audio.current} />}
+          {listening && <LevelMeters senders={senders} />}
           <span className="pill subtle" title="Model mode">
             {state.status.llm ? "Nebius LLM" : "Rules-only mode"}
           </span>
-          {listening ? (
-            <button className="btn" onClick={stopListening}>Pause audio</button>
-          ) : (
-            <button className="btn" onClick={startListening} disabled={!state.status.stt}
-              title={state.status.stt ? "Capture Meet tab + your mic" : "Set ELEVENLABS_API_KEY on the backend"}>
-              ● Start listening
-            </button>
+
+          {!live && (
+            <span className="start-group">
+              <select value={mode} onChange={(e) => chooseMode(e.target.value)} title={MODES[mode].hint} disabled={starting}>
+                {Object.entries(MODES).map(([k, m]) => (
+                  <option key={k} value={k}>{m.label}</option>
+                ))}
+              </select>
+              <button className="btn" onClick={start} disabled={!state.status.stt || starting || state.callEnded}
+                title={state.status.stt ? MODES[mode].hint : "Set ELEVENLABS_API_KEY on the backend"}>
+                {starting ? "Allow access…" : "● Start listening"}
+              </button>
+            </span>
           )}
-          <button className="btn danger" onClick={endCall}>End call</button>
-          <button className="btn ghost" onClick={reset} title="Reset demo deal">↺</button>
+          {live && !state.callEnded && (
+            <>
+              <button className="btn" onClick={togglePause}>{paused ? "▶ Resume" : "❚❚ Pause"}</button>
+              <button className="btn ghost" onClick={stopAudio} title="Release the mic / tab share">Stop audio</button>
+            </>
+          )}
+          {state.callEnded ? (
+            <button className="btn primary" onClick={newCall}>New call</button>
+          ) : (
+            <button className="btn danger" onClick={endCall}>End call</button>
+          )}
+          <button className="btn ghost" onClick={newCall} title="Reset demo deal">↺</button>
         </div>
       </header>
       {audioError && <div className="banner">{audioError}</div>}
 
       <main className="grid">
         <section className="panel">
-          <h2>Live transcript</h2>
-          <Transcript turns={state.transcript} partial={state.partial} />
+          <h2>
+            Live transcript <span className="muted">speakers auto-detected · click a label to correct</span>
+          </h2>
+          <Transcript
+            turns={state.transcript}
+            partial={state.partial}
+            onFlip={(t) => send({ type: "set_speaker", id: t.id, speaker: t.speaker === "customer" ? "rep" : "customer" })}
+          />
           <div className="composer">
             <div className="golden">
               {GOLDEN.map((g, i) => (
-                <button key={g} className="chip" onClick={() => sendTurn(g, "customer")} title={g}>
+                <button key={g} className="chip" onClick={() => sendTurn(g)} title={g}>
                   {i + 1}. {g.slice(0, 28)}…
                 </button>
               ))}
             </div>
             <form onSubmit={(e) => { e.preventDefault(); sendTurn(draft); }}>
-              <select value={speaker} onChange={(e) => setSpeaker(e.target.value)}>
-                <option value="customer">Customer</option>
-                <option value="rep">Rep</option>
-              </select>
-              <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Type a turn (dev mode)…" />
+              <input value={draft} onChange={(e) => setDraft(e.target.value)}
+                placeholder="Type what either person says; the speaker is detected automatically" />
               <button className="btn primary" type="submit">Send</button>
             </form>
           </div>
@@ -228,7 +311,7 @@ export default function App() {
             {state.suggestions.length === 0 && (
               <div className="empty">Listening for pricing, terms, compliance and legal questions…</div>
             )}
-            {[...state.suggestions].map((s) => (
+            {state.suggestions.map((s) => (
               <SuggestionCard
                 key={s.id}
                 s={s}

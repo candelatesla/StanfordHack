@@ -14,8 +14,11 @@ LINES = [
 AUDIO_DIR = config.ROOT.parent / "demo" / "customer_audio"
 
 
-async def tts(text: str, output_format: str = "mp3_44100_128") -> bytes:
-    voice = config.TTS_VOICE_ID or "21m00Tcm4TlvDq8ikWAM"
+REP_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # a second voice for single-mic tests
+
+
+async def tts(text: str, output_format: str = "mp3_44100_128", voice: str | None = None) -> bytes:
+    voice = voice or config.TTS_VOICE_ID or "21m00Tcm4TlvDq8ikWAM"
     async with httpx.AsyncClient(timeout=60) as http:
         r = await http.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
                             params={"output_format": output_format},

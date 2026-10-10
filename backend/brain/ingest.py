@@ -1,4 +1,9 @@
-"""Chunk the markdown knowledge base and embed it into an in-memory index at startup."""
+"""Chunk the markdown knowledge base into paragraphs and sentences; index both ways at startup.
+
+- Sparse: BM25 over sentences (title-boosted) -> exact, keyword-sensitive matches ("net 60", "BAA").
+- Dense: Nebius embeddings per sentence -> meaning of the whole utterance, paraphrases, context.
+Retrieval fuses the two at sentence level and rolls up to the paragraph (see agent/retrieve.py).
+"""
 import math
 import re
 from collections import Counter
@@ -18,19 +23,35 @@ class Chunk:
 
 
 @dataclass
+class Sentence:
+    chunk: int
+    text: str
+
+
+@dataclass
 class Index:
     chunks: list[Chunk] = field(default_factory=list)
-    vectors: np.ndarray | None = None  # Nebius embeddings, L2-normalised
-    bow: list[Counter] = field(default_factory=list)  # keyword fallback
+    sentences: list[Sentence] = field(default_factory=list)
+    vectors: np.ndarray | None = None          # one L2-normalised embedding per sentence
+    bags: list[Counter] = field(default_factory=list)
     idf: dict[str, float] = field(default_factory=dict)
+    avg_len: float = 1.0
 
 
 INDEX = Index()
 _TOKEN = re.compile(r"[a-z0-9]+")
+STOPWORDS = set("""a an the and or but if of to in on for with at by from as is are was were be been being it its
+this that these those we you they i our your their us me my do does did can could would should will may might
+must have has had not no so than then there here what which who whom how about into over under up down out
+any all each other some such only own same too very just also per via""".split())
 
 
 def tokens(text: str) -> list[str]:
-    return _TOKEN.findall(text.lower())
+    return [t for t in _TOKEN.findall(text.lower()) if t not in STOPWORDS]
+
+
+def split_sentences(para: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9*])", para) if s.strip()]
 
 
 def load_chunks() -> list[Chunk]:
@@ -54,17 +75,20 @@ async def embed(texts: list[str]) -> np.ndarray:
 
 async def build_index() -> Index:
     INDEX.chunks = load_chunks()
-    INDEX.bow = [Counter(tokens(f"{c.title} {c.text}")) for c in INDEX.chunks]
-    df = Counter(t for bag in INDEX.bow for t in bag)
-    n = len(INDEX.bow)
-    INDEX.idf = {t: math.log((n + 1) / (c + 0.5)) for t, c in df.items()}
+    INDEX.sentences = [Sentence(i, s) for i, c in enumerate(INDEX.chunks) for s in split_sentences(c.text)]
+    # title tokens count twice so "HIPAA" in a doc title anchors all its sentences
+    INDEX.bags = [Counter(tokens(f"{INDEX.chunks[s.chunk].title} " * 2 + s.text)) for s in INDEX.sentences]
+    n = len(INDEX.bags)
+    df = Counter(t for bag in INDEX.bags for t in bag)
+    INDEX.idf = {t: math.log(1 + (n - c + 0.5) / (c + 0.5)) for t, c in df.items()}  # BM25 idf
+    INDEX.avg_len = sum(sum(b.values()) for b in INDEX.bags) / max(n, 1)
     if client is not None:
         try:
             await resolve_embed_model()
-            INDEX.vectors = await embed([f"{c.title}: {c.text}" for c in INDEX.chunks])
+            INDEX.vectors = await embed([f"{INDEX.chunks[s.chunk].title}: {s.text}" for s in INDEX.sentences])
         except Exception as e:  # keep the demo alive on keyword search
-            print(f"[ingest] embeddings failed, using keyword search: {e}")
+            print(f"[ingest] embeddings failed, using keyword search only: {e}")
             INDEX.vectors = None
-    mode = "embeddings" if INDEX.vectors is not None else "keyword"
-    print(f"[ingest] {len(INDEX.chunks)} chunks indexed ({mode})")
+    mode = "hybrid (BM25 + embeddings)" if INDEX.vectors is not None else "BM25 only"
+    print(f"[ingest] {len(INDEX.chunks)} paragraphs / {len(INDEX.sentences)} sentences indexed, {mode}")
     return INDEX
