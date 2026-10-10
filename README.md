@@ -69,3 +69,8 @@ procurement, company overview, and objection talk tracks (price, competitor, tim
 | Answer cards + summary | `openai/gpt-oss-120b` (`SMART_MODEL`) | any model from `tools/check_keys.py`'s list works |
 | Embeddings | auto-picked (`Qwen/Qwen3-Embedding-8B`) | only on turns that pass the gate |
 | Voiceprints | WeSpeaker ResNet34 (local, sherpa-onnx) | no API call |
+
+## Team
+1. Yash Chetan Doshi
+2. Ritik Ashok Manghani
+3. Sarvesh Shirude
