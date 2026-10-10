@@ -2,7 +2,10 @@ import { useEffect, useRef } from "react";
 
 export default function Transcript({ turns, partial }) {
   const end = useRef(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [turns.length, partial]);
+  // braces matter: newer Chrome returns a Promise from scrollIntoView, which React would call as a cleanup
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [turns.length, partial]);
 
   return (
     <div className="transcript">
