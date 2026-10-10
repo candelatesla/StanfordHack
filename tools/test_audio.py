@@ -23,7 +23,13 @@ async def main():
     async with websockets.connect(f"{BASE}/ws/events") as ev, \
             websockets.connect(f"{BASE}/ws/audio?speaker=customer") as audio:
         await ev.send(json.dumps({"type": "reset"}))
-        ok = True
+        ok, seen = True, set()
+        inbox: asyncio.Queue = asyncio.Queue()
+
+        async def reader():  # timestamp events as they arrive, while audio is still streaming
+            async for raw in ev:
+                await inbox.put((time.perf_counter(), json.loads(raw)))
+        read_task = asyncio.create_task(reader())
         for i, line in enumerate(demo.LINES[:5]):
             pcm = await demo.tts(line, "pcm_16000") + b"\0" * 48000  # + 1.5s silence to end the turn
             t_end = None
@@ -32,27 +38,33 @@ async def main():
                 await asyncio.sleep(0.1)
                 if j + 3200 >= len(pcm) - 48000 and t_end is None:
                     t_end = time.perf_counter()
-            card, heard = None, None
-            deadline = time.perf_counter() + 8
+            card, heard, t_card, t_heard = None, None, None, None
+            deadline = time.perf_counter() + 12
             while time.perf_counter() < deadline:
                 try:
-                    msg = json.loads(await asyncio.wait_for(ev.recv(), deadline - time.perf_counter()))
+                    t_msg, msg = await asyncio.wait_for(inbox.get(), max(0.01, deadline - time.perf_counter()))
                 except asyncio.TimeoutError:
                     break
                 if msg["type"] == "transcript" and msg["is_final"]:
-                    heard = msg["text"]
+                    heard, t_heard = msg["text"], t_msg
                     if i not in EXPECT:
                         break
-                if msg["type"] == "suggestion" and msg["status"] == "done":
-                    card = msg
-                    break
-            speech_end_to_card = f"{(time.perf_counter() - t_end) * 1000:.0f}ms" if card else "-"
+                if msg["type"] == "suggestion" and msg["id"] not in seen:
+                    t_card = t_card or t_msg  # first paint of the new card
+                    if msg["status"] == "done" and msg.get("check"):
+                        card = msg
+                        seen.add(msg["id"])
+                        break
+            speech_end_to_card = f"{(t_card - t_end) * 1000:.0f}ms" if t_card else "-"
+            if t_heard:
+                speech_end_to_card += f" (STT final at +{(t_heard - t_end) * 1000:.0f}ms)"
             want = EXPECT.get(i)
             got = card["verdict"] if card else None
             status = "OK " if got == want else "FAIL"
             ok &= got == want
             print(f"[{status}] line {i}: heard={heard!r}\n        card={got} (want {want}) brain={card and card['latency_ms']}ms "
                   f"speech-end->card={speech_end_to_card}\n        say={card and card['counteroffer']!r}")
+        read_task.cancel()
         print("AUDIO E2E OK" if ok else "AUDIO E2E FAILED")
 
 

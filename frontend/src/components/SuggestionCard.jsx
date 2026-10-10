@@ -10,6 +10,11 @@ export default function SuggestionCard({ s, escalation, onAccept, onEscalate }) 
       <div className="card-head">
         <span className={`verdict v-${s.verdict}`}>{LABEL[s.verdict] || s.verdict}</span>
         <span className="request">{s.request}</span>
+        {s.check && (
+          <span className={`check ${s.check}`} title={CHECK_TITLE[s.check]}>
+            {s.check === "revised" ? "↻ revised" : "✓ LLM"}
+          </span>
+        )}
         <span className={`latency ${fast ? "fast" : "slow"}`} title={timingTitle(s.timing)}>
           ⚡ {s.latency_ms}ms
         </span>
@@ -54,7 +59,12 @@ export default function SuggestionCard({ s, escalation, onAccept, onEscalate }) 
   );
 }
 
-const dedupe = (xs) => xs.filter((x, i) => xs.findIndex((y) => y.title === x.title) === i);
+const CHECK_TITLE = {
+  verified: "Instant rules-path extraction, confirmed by the LLM",
+  revised: "LLM corrected the instant extraction; card recomputed",
+  llm: "Extracted by the LLM (phrasing not covered by the fast path)",
+};
+const dedupe =(xs) => xs.filter((x, i) => xs.findIndex((y) => y.title === x.title) === i);
 const fmt = (v) => (v === true ? "yes" : v === false ? "no" : v);
 const timingTitle = (t) =>
   t ? Object.entries(t).filter(([, v]) => v != null).map(([k, v]) => `${k}: ${v}ms`).join("\n") : "";

@@ -4,7 +4,7 @@ import json
 import re
 
 import config
-from agent.llm import client
+from agent.llm import client, extra
 
 SCHEMA = {
     "needs_brain": True,
@@ -27,26 +27,43 @@ CATEGORIES = {"pricing", "payment", "compliance", "legal", "product"}
 
 
 async def trigger(text: str, context: list[dict]) -> dict:
-    """LLM extraction within TRIGGER_TIMEOUT_S, merged with the regex extractor as a safety net."""
+    """Tiered extraction. Fast path: the regex extractor (~0ms) when it recognises the ask; the LLM
+    double-checks it afterwards via verify(). Long tail: the LLM extracts within TRIGGER_TIMEOUT_S."""
     rule_based = heuristic(text)
-    if client is None:
-        return rule_based
+    if rule_based["needs_brain"] or client is None:
+        return {**rule_based, "path": "fast"}
     try:
         out = await asyncio.wait_for(_llm_trigger(text, context), config.TRIGGER_TIMEOUT_S)
+        return {**out, "path": "llm"}
     except asyncio.TimeoutError:
-        print(f"[trigger] LLM over {config.TRIGGER_TIMEOUT_S * 1000:.0f}ms budget, using heuristic")
-        return rule_based
+        print(f"[trigger] LLM over {config.TRIGGER_TIMEOUT_S * 1000:.0f}ms budget")
     except Exception as e:
-        print(f"[trigger] LLM failed, heuristic fallback: {e}")
-        return rule_based
+        print(f"[trigger] LLM failed: {e}")
+    return {**rule_based, "path": "fast"}
+
+
+NUMERIC = ("discount_pct", "term_years", "payment_terms_days", "liability_multiple")
+
+
+async def verify(text: str, context: list[dict], fast: dict) -> dict | None:
+    """LLM second opinion on a fast-path extraction. Returns a corrected trigger, or None if it agrees."""
+    try:
+        out = await _llm_trigger(text, context)
+    except Exception as e:
+        print(f"[verify] LLM failed: {e}")
+        return None
     if not out["needs_brain"]:
-        return rule_based  # a keyword hit (%, net-60, HIPAA...) beats a false negative on a live call
-    if rule_based["needs_brain"]:
-        # numbers from the regex are literal; fill anything the model missed
-        for k, v in rule_based["request"].items():
-            if out["request"].get(k) is None and v is not None:
-                out["request"][k] = v
-    return out
+        return None  # keep the keyword hit; a false negative is worse on a live call
+    if out["category"] != fast["category"]:
+        return {**out, "path": "llm"}
+    merged = dict(fast["request"])
+    for k in NUMERIC:
+        v = out["request"].get(k)
+        if v is not None and (merged.get(k) is None or float(v) != float(merged[k])):
+            merged[k] = v
+    if merged == fast["request"]:
+        return None
+    return {**fast, "request": merged, "path": "llm"}
 
 
 async def _llm_trigger(text: str, context: list[dict]) -> dict:
@@ -56,7 +73,8 @@ async def _llm_trigger(text: str, context: list[dict]) -> dict:
         messages=[{"role": "system", "content": PROMPT},
                   {"role": "user", "content": f"Context:\n{ctx}\n\nLatest CUSTOMER turn: {text}"}],
         temperature=0,
-        max_tokens=200,
+        max_tokens=600,
+        **extra(config.FAST_MODEL),
         response_format={"type": "json_object"},
     )
     return _normalise(json.loads(resp.choices[0].message.content), text)
@@ -97,6 +115,25 @@ def words_to_digits(t: str) -> str:
     return _SPOKEN.sub(sub, t)
 
 
+FAST_QUERIES = {
+    "discount": "multi-year discount policy approval",
+    "pricing": "pricing tiers and discount policy",
+    "net": "payment terms net 60 approval",
+    "payment": "payment terms",
+    "liability": "limitation of liability cap escalation",
+    "termination": "termination for convenience",
+    "hipaa_baa": "HIPAA business associate agreement BAA",
+    "eu_residency": "EU data residency",
+    "soc2": "SOC 2 Type II report",
+    "gdpr": "GDPR DPA",
+    "sso": "SSO features by tier",
+    "api": "API access by tier",
+    "dedicated_csm": "dedicated customer success manager",
+    "sla": "SLA uptime support",
+    "on_premise": "on-premise deployment",
+}
+
+
 def heuristic(text: str) -> dict:
     """Keyword/regex extractor. Used without an API key and as a safety net when the LLM fails."""
     t = words_to_digits(text.lower().replace("thirty-", "thirty ").replace(",", ""))
@@ -108,34 +145,34 @@ def heuristic(text: str) -> dict:
 
     if m := re.search(r"(\d+(?:\.\d+)?)\s*(?:%|percent)", t):
         req["discount_pct"] = float(m.group(1))
-        return _hit("pricing", req, "multi-year discount policy approval")
+        return _hit("pricing", req, FAST_QUERIES["discount"])
     if any(w in t for w in ("discount", "cheaper", "lower the price", "better price", "pricing", "how much")):
-        return _hit("pricing", req, "pricing tiers and discount policy")
+        return _hit("pricing", req, FAST_QUERIES["pricing"])
 
     if m := re.search(r"net[\s-]*(\d+)", t):
         req["payment_terms_days"] = int(m.group(1))
-        return _hit("payment", req, "payment terms net 60 approval")
+        return _hit("payment", req, FAST_QUERIES["net"])
     if "payment terms" in t or "pay in" in t:
-        return _hit("payment", req, "payment terms")
+        return _hit("payment", req, FAST_QUERIES["payment"])
 
     if "liability" in t or re.search(r"\bcap\b", t):
         if m := re.search(rf"{n}\s*(?:x|times)\b", t) or re.search(r"(double|triple)", t):
             req["liability_multiple"] = _num(m.group(1))
-        return _hit("legal", req, "limitation of liability cap escalation")
+        return _hit("legal", req, FAST_QUERIES["liability"])
     if "termination" in t or "terminate" in t or "cancel" in t:
         req["feature"] = "termination_for_convenience"
-        return _hit("legal", req, "termination for convenience")
+        return _hit("legal", req, FAST_QUERIES["termination"])
 
     for words, feature, cat, q in [
-        (("hipaa", "baa", "phi", "healthcare"), "hipaa_baa", "compliance", "HIPAA business associate agreement BAA"),
-        (("residency", "eu data", "data in europe", "frankfurt"), "eu_residency", "compliance", "EU data residency"),
-        (("soc 2", "soc2", "soc ii"), "soc2", "compliance", "SOC 2 Type II report"),
-        (("gdpr", "dpa"), "gdpr", "compliance", "GDPR DPA"),
-        (("sso", "saml", "single sign"), "sso", "product", "SSO features by tier"),
-        (("api",), "api", "product", "API access by tier"),
-        (("csm", "customer success"), "dedicated_csm", "product", "dedicated customer success manager"),
-        (("sla", "uptime", "support"), None, "product", "SLA uptime support"),
-        (("on-prem", "on prem", "self-host"), "on_premise", "product", "on-premise deployment"),
+        (("hipaa", "baa", "phi", "healthcare"), "hipaa_baa", "compliance", FAST_QUERIES["hipaa_baa"]),
+        (("residency", "eu data", "data in europe", "frankfurt"), "eu_residency", "compliance", FAST_QUERIES["eu_residency"]),
+        (("soc 2", "soc2", "soc ii"), "soc2", "compliance", FAST_QUERIES["soc2"]),
+        (("gdpr", "dpa"), "gdpr", "compliance", FAST_QUERIES["gdpr"]),
+        (("sso", "saml", "single sign"), "sso", "product", FAST_QUERIES["sso"]),
+        (("api",), "api", "product", FAST_QUERIES["api"]),
+        (("csm", "customer success"), "dedicated_csm", "product", FAST_QUERIES["dedicated_csm"]),
+        (("sla", "uptime", "support"), None, "product", FAST_QUERIES["sla"]),
+        (("on-prem", "on prem", "self-host"), "on_premise", "product", FAST_QUERIES["on_premise"]),
     ]:
         if any(re.search(rf"\b{re.escape(w)}", t) for w in words):
             req["feature"] = feature

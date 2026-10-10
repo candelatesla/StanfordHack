@@ -5,7 +5,8 @@ import time
 from agent import rules
 from agent.respond import respond
 from agent.retrieve import retrieve
-from agent.trigger import trigger
+from agent.llm import client
+from agent.trigger import trigger, verify
 from session import Session
 
 
@@ -61,6 +62,8 @@ async def on_final_customer_turn(session: Session, text: str):
     recent = prev if prev and time.time() - prev["ts"] < MERGE_WINDOW_S else None
     session.last_customer_turn = turn = {"text": text, "ts": time.time(), "card": None}
     context = session.transcript[-6:-1]
+    # Speculative search on the raw words, overlapping the trigger; used only on the LLM path.
+    speculative = asyncio.create_task(retrieve(text))
     trigger_text = text
     trig = await trigger(text, context)
     if not trig.get("needs_brain") and recent:
@@ -69,42 +72,69 @@ async def on_final_customer_turn(session: Session, text: str):
         trig = await trigger(trigger_text, context[:-1])
     t_trigger = _ms(t0)
     if not trig.get("needs_brain"):
+        speculative.cancel()
         print(f"[pipeline] no brain needed ({t_trigger}ms): {text!r}")
         return
     turn["text"] = trigger_text
 
-    deal = session.deal
+    if trig["path"] == "llm" and trigger_text == text:
+        sources_task = speculative
+    else:
+        speculative.cancel()
+        sources_task = retrieve(trig["query"])  # fast-path queries are pre-embedded
+    check = asyncio.create_task(verify(trigger_text, context, trig)) if trig["path"] == "fast" and client else None
+
+    sid = _find_reusable_card(session, trig, describe_request(trig), recent and recent["card"]) or session.next_id()
+    turn["card"] = sid
+    card = await _build_card(session, sid, trig, trigger_text, t0, t_trigger, sources_task,
+                             check="llm" if trig["path"] == "llm" or not client else None)
+
+    if check:
+        corrected = await check
+        if card.get("resolution"):
+            return
+        if corrected:
+            print(f"[pipeline] LLM revised fast-path extraction: {trig['request']} -> {corrected['request']}")
+            card = await _build_card(session, sid, corrected, trigger_text, time.perf_counter(), None,
+                                     retrieve(corrected["query"]))
+            card["check"] = "revised"
+        else:
+            card["check"] = "verified"
+        await session.emit(card)
+
+
+async def _build_card(session: Session, sid: str, trig: dict, text: str, t0: float, t_trigger: int | None,
+                      sources_task, check: str | None = None) -> dict:
     t1 = time.perf_counter()
-    sources, verdict = await asyncio.gather(
-        retrieve(trig["query"]),
-        asyncio.to_thread(rules.check, trig, deal),
-    )
+    deal = session.deal
+    sources, verdict = await asyncio.gather(sources_task, asyncio.to_thread(rules.check, trig, deal))
+    sources = [s for s in sources if s["score"] >= 0.85 * sources[0]["score"]][:2] if sources else []
     t_lookup = _ms(t1)
     brain_ms = _ms(t0)
-    print(f"[pipeline] trigger={t_trigger}ms retrieve+rules={t_lookup}ms brain_total={brain_ms}ms verdict={verdict['verdict']}")
-
-    request = describe_request(trig)
-    sid = _find_reusable_card(session, trig, request, recent and recent["card"]) or session.next_id()
-    turn["card"] = sid
+    print(f"[pipeline] {trig['path']} path: trigger={t_trigger}ms retrieve+rules={t_lookup}ms "
+          f"brain_total={brain_ms}ms verdict={verdict['verdict']}")
+    old = session.suggestions.get(sid, {})
     card = {
-        "type": "suggestion", "id": sid, "status": "streaming", "created": time.time(),
+        "type": "suggestion", "id": sid, "status": "streaming", "created": old.get("created", time.time()),
         "verdict": verdict["verdict"],
         "category": trig["category"],
-        "request": request,
-        "customer_text": trigger_text,
+        "request": describe_request(trig),
+        "customer_text": text,
         "answer": "", "counteroffer": "",
-        "sources": [{"title": s["title"], "snippet": s["snippet"]} for s in sources[:2]],
+        "sources": [{"title": s["title"], "snippet": s["snippet"]} for s in sources],
         "proposed_changes": proposed_changes(verdict),
         "approval_needed": verdict.get("approval_needed"),
         "reason": verdict.get("reason"),
-        "latency_ms": brain_ms,
+        "latency_ms": old.get("latency_ms", brain_ms),
+        "path": trig["path"],
+        "check": check,
         "timing": {"trigger_ms": t_trigger, "lookup_ms": t_lookup},
     }
     session.suggestions[sid] = card
     await session.emit(card)
 
     first_token_ms = None
-    async for partial in respond(trigger_text, trig, verdict, sources):
+    async for partial in respond(text, trig, verdict, sources, deal):
         if first_token_ms is None:
             first_token_ms = _ms(t0)
         card.update(partial)
@@ -113,3 +143,4 @@ async def on_final_customer_turn(session: Session, text: str):
     card["timing"]["first_token_ms"] = first_token_ms
     card["timing"]["total_ms"] = _ms(t0)
     await session.emit(card)
+    return card

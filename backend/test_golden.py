@@ -1,8 +1,10 @@
 """Golden-demo smoke test: python test_golden.py (works with or without API keys)."""
 from fastapi.testclient import TestClient
 
+import config
 from main import app
 
+LLM = config.LLM_ENABLED
 LINES = [
     ("Can you do 20% off if we sign for 3 years?", "counter", {"discount_pct": 15, "term_years": 3}),
     ("We're in healthcare. Do you sign a HIPAA BAA?", "info", {"hipaa_baa": True}),
@@ -11,7 +13,7 @@ LINES = [
 ]
 
 
-def until(ws, pred, limit=50):
+def until(ws, pred, limit=80):
     for _ in range(limit):
         ev = ws.receive_json()
         if pred(ev):
@@ -19,16 +21,32 @@ def until(ws, pred, limit=50):
     raise AssertionError("event not received")
 
 
-with TestClient(app) as c, c.websocket_connect("/ws/events") as ws:
+def done(e):
+    return e["type"] == "suggestion" and e["status"] == "done"
+
+
+def settled(e):
+    """Card finished and, with an LLM, its background check has landed too."""
+    return done(e) and (e.get("check") is not None or not LLM)
+
+
+def fresh(ws):
     assert ws.receive_json()["type"] == "init"
     ws.send_json({"type": "reset"})
     until(ws, lambda e: e["type"] == "init")
+    return ws
+
+
+def golden(ws):
+    fresh(ws)
     ws.send_json({"type": "text_turn", "speaker": "customer", "text": "Hi, thanks for joining, how's your week?"})
     until(ws, lambda e: e["type"] == "transcript")
     for text, verdict, changes in LINES:
         ws.send_json({"type": "text_turn", "speaker": "customer", "text": text})
-        card = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
-        print(f"{card['verdict']:9} {card['latency_ms']:4}ms | {card['request']}\n   ANSWER: {card['answer']}\n   SAY:    {card['counteroffer']}\n   SRC:    {[s['title'] for s in card['sources']]}")
+        card = until(ws, settled)
+        print(f"{card['verdict']:9} {card['latency_ms']:4}ms {card['path']}/{card['check']} | {card['request']}\n"
+              f"   ANSWER: {card['answer']}\n   SAY:    {card['counteroffer']}\n"
+              f"   SRC:    {[s['title'] for s in card['sources']]}")
         assert card["verdict"] == verdict, card
         assert card["proposed_changes"] == changes, card["proposed_changes"]
         if verdict == "escalate":
@@ -40,23 +58,30 @@ with TestClient(app) as c, c.websocket_connect("/ws/events") as ws:
             print("  -> changes:", [(d["clause"], d["old"], d["new"]) for d in upd["changes"]])
     ws.send_json({"type": "end_call"})
     s = until(ws, lambda e: e["type"] == "summary")
-    print("SUMMARY agreed:", s["agreed"], "\nopen:", s["open_items"], "\ncrm:", s["crm_changes"])
+    print("SUMMARY recap:", s["recap"], "\nagreed:", s["agreed"], "\nopen:", s["open_items"],
+          "\nnext:", s["next_steps"])
     assert upd["fields"]["arr"] == 127500
-print("GOLDEN DEMO OK")
+    print("GOLDEN DEMO OK")
 
-# STT split one ask across two turns -> one card, updated in place with the merged ask
-with TestClient(app) as c, c.websocket_connect("/ws/events") as ws:
-    ws.receive_json()
-    ws.send_json({"type": "reset"})
-    until(ws, lambda e: e["type"] == "init")
+
+def split_and_dedupe(ws):
+    """STT split one ask across two turns -> one card, updated in place; a repeat reuses it too."""
+    fresh(ws)
     ws.send_json({"type": "text_turn", "speaker": "customer", "text": "Can you do 20% off"})
-    first = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
+    first = until(ws, settled)
     ws.send_json({"type": "text_turn", "speaker": "customer", "text": "if we sign for three years?"})
-    second = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
-    print(f"split: {first['id']} {first['request']!r} -> {second['id']} {second['request']!r}")
+    second = until(ws, lambda e: settled(e) and "3-year" in e["request"])
+    print(f"split: {first['id']} {first['request']!r} -> {second['id']} {second['request']!r} "
+          f"({second['path']}/{second['check']})")
     assert first["id"] == second["id"] and second["proposed_changes"] == {"discount_pct": 15, "term_years": 3}
-    # repeat of the same ask -> same card
     ws.send_json({"type": "text_turn", "speaker": "customer", "text": "So can you do 20% off for 3 years?"})
-    third = until(ws, lambda e: e["type"] == "suggestion" and e["status"] == "done")
+    third = until(ws, settled)
     assert third["id"] == first["id"], third["id"]
-print("SPLIT/DEDUPE OK")
+    print("SPLIT/DEDUPE OK")
+
+
+with TestClient(app) as client:
+    with client.websocket_connect("/ws/events") as ws:
+        golden(ws)
+    with client.websocket_connect("/ws/events") as ws:
+        split_and_dedupe(ws)

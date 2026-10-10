@@ -11,8 +11,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import config  # noqa: E402
+from agent.llm import extra  # noqa: E402
 
-FAST_HINTS = ["Meta-Llama-3.1-8B-Instruct", "Qwen3-4B", "Qwen2.5-7B", "Qwen3-8B", "gemma-2-9b", "Mistral-7B", "8B", "7B", "9B"]
+FAST_HINTS = ["gpt-oss-120b", "Meta-Llama-3.1-8B-Instruct", "Qwen3-4B", "Qwen2.5-7B", "Qwen3-8B", "gemma-2-9b", "Mistral-7B", "8B", "7B", "9B"]
 SMART_HINTS = ["Llama-3.3-70B-Instruct", "Qwen3-32B", "Qwen2.5-72B", "Meta-Llama-3.1-70B", "gpt-oss-120b", "70B", "72B", "32B"]
 NOT_CHAT = ("embed", "bge", "e5-", "vision", "VL", "guard", "Guard", "flux", "FLUX", "Coder", "Math")
 
@@ -26,8 +27,9 @@ async def time_chat(client, model, json_mode, n=3):
     for _ in range(n):
         t0 = time.perf_counter()
         kw = {"response_format": {"type": "json_object"}} if json_mode else {}
+        kw.update(extra(model))
         r = await client.chat.completions.create(
-            model=model, temperature=0, max_tokens=60,
+            model=model, temperature=0, max_tokens=600,
             messages=[{"role": "system", "content": 'Return JSON {"needs_brain": bool, "discount_pct": number|null}.'},
                       {"role": "user", "content": "Can you do 20% off if we sign for 3 years?"}], **kw)
         times.append(ms(t0))

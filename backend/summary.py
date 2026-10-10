@@ -3,7 +3,7 @@ import json
 
 import config
 import contract
-from agent.llm import client
+from agent.llm import client, extra
 from session import Session
 
 LABELS = {"tier": "Tier", "discount_pct": "Discount %", "term_years": "Term (years)", "payment_terms": "Payment terms",
@@ -47,7 +47,7 @@ async def _llm_recap(session: Session, facts: dict) -> dict:
                        "Summarise this sales call for the rep's manager. Return JSON: "
                        '{"recap": "2-3 sentences", "next_steps": ["..."]}. Use only the facts given.'},
                       {"role": "user", "content": f"Transcript:\n{convo}\n\nFacts:\n{json.dumps(facts, default=str)}"}],
-            temperature=0.2, max_tokens=300, response_format={"type": "json_object"},
+            temperature=0.2, max_tokens=900, response_format={"type": "json_object"}, **extra(config.SMART_MODEL),
         )
         data = json.loads(resp.choices[0].message.content)
         return {"recap": data.get("recap", ""), "next_steps": data.get("next_steps", [])}

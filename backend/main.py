@@ -19,6 +19,8 @@ import stt
 import summary
 from agent.llm import warmup
 from agent.pipeline import on_final_customer_turn
+from agent.retrieve import warm_queries
+from agent.trigger import FAST_QUERIES
 from brain.ingest import INDEX, build_index
 from session import SESSION
 
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI):
     crm.init()
     SESSION.reset()
     await build_index()
+    await warm_queries(list(FAST_QUERIES.values()))
     if config.LLM_ENABLED:
         await warmup()
     print(f"[startup] LLM {'enabled: ' + config.FAST_MODEL + ' / ' + config.SMART_MODEL if config.LLM_ENABLED else 'disabled (heuristic mode)'}")

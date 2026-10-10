@@ -8,6 +8,16 @@ import config
 client = AsyncOpenAI(api_key=config.NEBIUS_API_KEY, base_url=config.NEBIUS_BASE_URL,
                      timeout=20, max_retries=1) if config.LLM_ENABLED else None
 
+_REASONING_HINTS = ("gpt-oss", "deepseek-r1", "qwq", "thinking")
+
+
+def extra(model: str) -> dict:
+    """Per-model kwargs: reasoning models get a low reasoning effort (budget counts toward max_tokens)."""
+    if any(h in model.lower() for h in _REASONING_HINTS):
+        return {"extra_body": {"reasoning_effort": config.REASONING_EFFORT}}
+    return {}
+
+
 _EMBED_HINTS = ("embed", "bge", "e5-", "gte", "qwen3-embedding", "nomic")
 
 
@@ -32,7 +42,7 @@ async def warmup():
     for model in dict.fromkeys([config.FAST_MODEL, config.SMART_MODEL]):
         t0 = time.perf_counter()
         try:
-            await client.chat.completions.create(model=model, max_tokens=1,
+            await client.chat.completions.create(model=model, max_tokens=16, **extra(model),
                                                  messages=[{"role": "user", "content": "hi"}])
             print(f"[llm] warm {model}: {(time.perf_counter() - t0) * 1000:.0f}ms")
         except Exception as e:

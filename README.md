@@ -35,9 +35,9 @@ Single-port mode (also what Replit runs): `bash start.sh` → http://localhost:8
 
 | Step | File | Notes |
 |---|---|---|
-| STT | `backend/stt.py` | ElevenLabs realtime; auto-falls back to VAD + batch STT. Tab audio = customer, mic = rep |
-| Trigger | `backend/agent/trigger.py` | `FAST_MODEL` JSON extraction; regex heuristic when no key / on failure |
-| Retrieve | `backend/agent/retrieve.py`, `brain/ingest.py` | In-memory numpy cosine over Nebius embeddings; keyword fallback |
+| STT | `backend/stt.py` | ElevenLabs Scribe v2 realtime; reconnects automatically if the upstream socket drops, falls back to VAD + batch STT. Tab audio = customer, mic = rep |
+| Trigger | `backend/agent/trigger.py` | **Fast path:** regex extractor (~0ms) for recognised asks, then `FAST_MODEL` verifies in the background and revises the card if it disagrees. **Long tail:** `FAST_MODEL` extracts (≤1.5s budget) |
+| Retrieve | `backend/agent/retrieve.py`, `brain/ingest.py` | In-memory numpy cosine over Nebius embeddings (fast-path queries pre-embedded; long-tail search runs in parallel with the trigger); keyword fallback |
 | Rules | `backend/agent/rules.py` + `brain/rules.json` | **Authoritative.** The LLM never decides what's allowed |
 | Respond | `backend/agent/respond.py` | `SMART_MODEL` streams `ANSWER:` / `SAY:`; deterministic template fallback |
 | CRM / contract | `backend/crm.py`, `backend/contract.py` | SQLite + clause-level diff |
@@ -46,3 +46,22 @@ Single-port mode (also what Replit runs): `bash start.sh` → http://localhost:8
 Every card shows the brain latency (trigger + retrieve + rules); hover it for the per-step breakdown.
 
 Extra event-socket messages beyond the plan's contract: `init` (state snapshot on connect), `reset` (client → server, resets the demo deal), `suggestion_resolved`.
+
+## Models (all via the Nebius key)
+
+| Role | Model | Notes |
+|---|---|---|
+| Trigger / verify | `openai/gpt-oss-120b` | `reasoning_effort=low`; ~400–500ms per call |
+| Answer cards + summary | `openai/gpt-oss-120b` (`SMART_MODEL`) | any model from `tools/check_keys.py`'s list works |
+| Embeddings | auto-picked (`Qwen/Qwen3-Embedding-8B`) | ~390ms per query, so fast-path queries are pre-embedded at startup |
+
+## Measured latency (tools/test_audio.py, ElevenLabs voice → realtime STT → card)
+
+| Golden line | Brain (trigger+retrieve+rules) | Speech end → card on screen |
+|---|---|---|
+| 20% off for 3 years | 7ms | 612ms |
+| HIPAA BAA | 6ms | 513ms |
+| Net-60 | 7ms | 733ms |
+| 3x liability cap | 7ms | 862ms |
+
+Nearly all of the speech-end→card time is STT end-of-turn detection (`vad_silence_threshold_secs=0.6`).

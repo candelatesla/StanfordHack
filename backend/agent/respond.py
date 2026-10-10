@@ -3,19 +3,23 @@ import json
 from typing import AsyncIterator
 
 import config
-from agent.llm import client
+from agent.llm import client, extra
 
 PROMPT = """You are a sales copilot for Nimbus Analytics. Write for the REP, not the customer.
-You are given: the customer request, the rules verdict (AUTHORITATIVE, never override it) and source snippets.
+You are given: the customer request, the rules verdict (AUTHORITATIVE, never override it), the current deal
+(already-agreed terms; e.g. don't suggest upgrading to a tier they're already on) and source snippets.
 Output exactly two lines, nothing else:
 ANSWER: <one sentence: what is and isn't allowed, citing approvals if needed>
 SAY: <one natural sentence the rep can say out loud to the customer>
-Never offer anything beyond the verdict's "allowed" values. If the verdict is escalate, SAY should
+Never offer anything beyond the verdict's "allowed" values. Only state what the verdict and sources say;
+don't invent restrictions. Never mention field names, rule IDs or file names; use plain sales language
+(e.g. "Net 60", "15% for a 3-year term"). Keep each line under 25 words. If the verdict is escalate, SAY should
 offer the allowed fallback (if any) and promise to get an answer from the approver quickly.
 If no rule covers the request, say it is not in the Company Brain and should be flagged for follow-up."""
 
 
-async def respond(customer_text: str, trig: dict, verdict: dict, sources: list[dict]) -> AsyncIterator[dict]:
+async def respond(customer_text: str, trig: dict, verdict: dict, sources: list[dict],
+                  deal: dict | None = None) -> AsyncIterator[dict]:
     """Yields progressively more complete {"answer", "counteroffer"} dicts."""
     if client is None:
         yield template(trig, verdict, sources)
@@ -24,6 +28,8 @@ async def respond(customer_text: str, trig: dict, verdict: dict, sources: list[d
         "customer_said": customer_text,
         "request": trig.get("request"),
         "verdict": verdict,
+        "current_deal": {k: (deal or {}).get(k) for k in ("customer", "tier", "arr", "discount_pct", "term_years",
+                                                          "payment_terms", "liability_cap_multiple", "hipaa_baa")},
         "sources": [{"title": s["title"], "snippet": s["snippet"]} for s in sources[:2]],
     }
     try:
@@ -32,7 +38,8 @@ async def respond(customer_text: str, trig: dict, verdict: dict, sources: list[d
             messages=[{"role": "system", "content": PROMPT},
                       {"role": "user", "content": json.dumps(payload)}],
             temperature=0.2,
-            max_tokens=160,
+            max_tokens=600,
+            **extra(config.SMART_MODEL),
             stream=True,
         )
         buf = ""

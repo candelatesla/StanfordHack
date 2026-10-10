@@ -30,6 +30,7 @@ class RealtimeSTT:
         self.on_text = on_text
         self.ws = None
         self.reader: asyncio.Task | None = None
+        self.dead = False
 
     async def start(self):
         params = [("model_id", config.STT_REALTIME_MODEL), ("audio_format", "pcm_16000"),
@@ -52,8 +53,10 @@ class RealtimeSTT:
                     await self.on_text(text, True)
                 elif "error" in msg:
                     print(f"[stt] realtime {kind}: {msg['error']}")
-        except websockets.ConnectionClosed:
-            pass
+        except websockets.ConnectionClosed as e:
+            print(f"[stt] realtime connection closed: {e}")
+        finally:
+            self.dead = True
 
     async def feed(self, pcm: bytes):
         await self.ws.send(json.dumps({"message_type": "input_audio_chunk",
@@ -61,10 +64,14 @@ class RealtimeSTT:
                                        "commit": False, "sample_rate": SAMPLE_RATE}))
 
     async def close(self):
-        if self.ws:
-            await self.ws.close()
+        self.dead = True
         if self.reader:
             self.reader.cancel()
+        if self.ws:
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
 
 
 class BatchSTT:
@@ -74,6 +81,8 @@ class BatchSTT:
     END_SILENCE_FRAMES = 7     # 700ms of silence ends an utterance
     MIN_SPEECH_FRAMES = 3
     MAX_FRAMES = 150           # 15s hard cut
+
+    dead = False  # batch never drops a connection; failures are per-utterance
 
     def __init__(self, on_text: OnText):
         self.on_text = on_text
@@ -139,7 +148,7 @@ class BatchSTT:
         await self.http.aclose()
 
 
-async def open_stream(on_text: OnText):
+async def _open(on_text: OnText):
     if config.STT_MODE == "realtime":
         stream = RealtimeSTT(on_text)
         try:
@@ -147,7 +156,42 @@ async def open_stream(on_text: OnText):
             print("[stt] realtime stream connected")
             return stream
         except Exception as e:
-            print(f"[stt] realtime connect failed ({e}); falling back to batch")
+            print(f"[stt] realtime connect failed ({e!r}); falling back to batch")
     stream = BatchSTT(on_text)
+    await stream.start()
+    return stream
+
+
+class ResilientSTT:
+    """Keeps transcription alive for the whole call: if the upstream STT socket dies, reopen it
+    (realtime first, then batch) on the next audio chunk instead of killing the browser's audio socket."""
+
+    def __init__(self, on_text: OnText):
+        self.on_text = on_text
+        self.inner = None
+        self.reconnects = 0
+
+    async def start(self):
+        self.inner = await _open(self.on_text)
+
+    async def feed(self, pcm: bytes):
+        if self.inner.dead:
+            self.reconnects += 1
+            print(f"[stt] upstream lost; reconnect #{self.reconnects}")
+            await self.inner.close()
+            self.inner = await _open(self.on_text)
+        try:
+            await self.inner.feed(pcm)
+        except Exception as e:
+            print(f"[stt] feed failed ({e!r}); will reconnect")
+            self.inner.dead = True
+
+    async def close(self):
+        if self.inner:
+            await self.inner.close()
+
+
+async def open_stream(on_text: OnText):
+    stream = ResilientSTT(on_text)
     await stream.start()
     return stream
