@@ -27,7 +27,7 @@ const initial = {
   summary: null,
   callEnded: false,
   calibrating: false,
-  stats: { turns: 0, skipped: 0, llm_calls: 0, embed_calls: 0, voices: [] },
+  stats: { turns: 0, skipped: 0, llm_calls: 0, embed_calls: 0, echoes: 0, voices: [] },
   status: { llm: false, stt: false, voice: false },
 };
 
@@ -119,11 +119,12 @@ function LevelMeters({ senders }) {
   );
 }
 
+const MODE_KEY = "dealbrain.mode.v2"; // v2: call-tab mode became the default
 const loadMode = () => {
   try {
-    return localStorage.getItem("dealbrain.mode") || "mic";
+    return localStorage.getItem(MODE_KEY) || "meet";
   } catch {
-    return "mic";
+    return "meet";
   }
 };
 
@@ -159,6 +160,7 @@ export default function App() {
   const send = (msg) => events.current?.send(msg);
   const live = senders.length > 0;
   const singleMic = senders.some((s) => s.speaker === "auto");
+  const tabMode = senders.some((s) => s.speaker === "customer");
   const calibrate = () => {
     send({ type: "calibrate" });
     dispatch({ type: "calibrate_start" });
@@ -177,7 +179,7 @@ export default function App() {
   const chooseMode = (m) => {
     setMode(m);
     try {
-      localStorage.setItem("dealbrain.mode", m);
+      localStorage.setItem(MODE_KEY, m);
     } catch {
       /* private mode: just don't remember */
     }
@@ -308,6 +310,11 @@ export default function App() {
       </header>
       {audioError && <div className="banner">{audioError}</div>}
       {state.calibrating && <div className="banner info">Rep: say one sentence now so DealBrain learns your voice.</div>}
+      {tabMode && st.echoes > 0 && !state.callEnded && (
+        <div className="banner info">
+          Your mic is picking up the customer from your speakers ({st.echoes} echo{st.echoes === 1 ? "" : "es"} filtered). <b>Wear headphones</b> for clean speaker labels.
+        </div>
+      )}
       {singleMic && state.status.voice && !repKnown && !state.calibrating && !state.callEnded && (
         <div className="banner info">Single-mic mode: click <b>Calibrate my voice</b> and say one sentence for the most reliable speaker detection.</div>
       )}
@@ -315,7 +322,7 @@ export default function App() {
       <main className="grid">
         <section className="panel">
           <h2>
-            Live transcript <span className="muted">speakers auto-detected · click a label to correct</span>
+            Live transcript <span className="muted">{tabMode ? "speakers from audio source" : "speakers auto-detected"} · click a label to correct</span>
           </h2>
           <Transcript
             turns={state.transcript}

@@ -109,10 +109,31 @@ async def handle_turn(speaker: str, text: str, voiceprint=None):
                     roster.vote(vid, guess, min(score / 2.0, 2.5))
         turn["voice_id"] = vid
     else:
-        if speaker == "rep" and SESSION.is_echo(text):
-            print(f"[turn] dropped rep-mic echo of customer audio: {text!r}")
+        if speaker == "rep":
+            spawn(rep_turn(text))
             return
         turn = SESSION.add_turn(speaker, text)
+    await SESSION.emit(turn)
+    spawn(process_turn(SESSION, turn))
+
+
+ECHO_WAIT_S = 0.8
+
+
+async def rep_turn(text: str):
+    """Rep mic in Meet mode. Without headphones it also hears the customer through the speakers, and the
+    tab's transcript of those same words can land a moment later, so wait briefly before the echo check."""
+    call = SESSION.call_id
+    await asyncio.sleep(ECHO_WAIT_S)
+    if SESSION.call_id != call:
+        return
+    if SESSION.is_echo(text):
+        print(f"[turn] dropped rep-mic echo of customer audio: {text!r}")
+        SESSION.stats["echoes"] += 1
+        await SESSION.emit({"type": "transcript", "speaker": "rep", "text": "", "is_final": False, "ts": time.time()})
+        await SESSION.emit_stats()
+        return
+    turn = SESSION.add_turn("rep", text)
     await SESSION.emit(turn)
     spawn(process_turn(SESSION, turn))
 
@@ -212,6 +233,8 @@ async def ws_audio(ws: WebSocket, speaker: str = "auto"):
                 vp = (emb, len(clip) / 32000)  # emb is None for clips too short to fingerprint
             await handle_turn(speaker, text, vp)
         else:
+            if speaker == "customer":
+                SESSION.customer_partial = (text, time.time())
             await SESSION.emit({"type": "transcript", "speaker": speaker, "text": text,
                                 "is_final": False, "ts": time.time()})
 

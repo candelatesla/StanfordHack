@@ -26,7 +26,8 @@ class Session:
         self.last_customer_turn: dict | None = None
         self.roster = VoiceRoster()     # voices heard on this call (single-mic mode)
         self.calibrate_until = 0.0      # next voiced turn before this time is the rep's calibration
-        self.stats = {"turns": 0, "skipped": 0, "llm_calls": 0, "embed_calls": 0}
+        self.stats = {"turns": 0, "skipped": 0, "llm_calls": 0, "embed_calls": 0, "echoes": 0}
+        self.customer_partial = ("", 0.0)  # latest in-progress customer text (tab audio) + when it arrived
         self._ids = itertools.count(1)
         self._turn_ids = itertools.count(1)
         self.call_id = uuid.uuid4().hex  # late background work from a previous call is dropped
@@ -80,16 +81,25 @@ class Session:
 
     def is_echo(self, text: str, window_s: float = 6.0) -> bool:
         """Rep mic picking up the customer's audio from the speakers (tab + mic mode)."""
-        words = set(text.lower().split())
+        words = _words(text)
+        if not words:
+            return False
         now = time.time()
-        for t in reversed(self.transcript):
-            if now - t["ts"] > window_s:
-                break
-            if t["speaker"] == "customer":
-                other = set(t["text"].lower().split())
-                if words and len(words & other) / len(words | other) >= 0.6:
-                    return True
-        return False
+        heard = [t["text"] for t in self.transcript
+                 if t["speaker"] == "customer" and now - t["ts"] <= window_s]
+        partial, ts = self.customer_partial
+        if partial and now - ts <= window_s:  # the tab's own transcript may not be final yet
+            heard.append(partial)
+        # The two streams split sentences differently (one mic turn can span two tab turns), so ask "is most
+        # of the mic text in what the customer just said, taken together?" Short fragments must be fully
+        # contained. Dropping a rep's "sounds good" costs nothing (rep turns make no cards); a customer
+        # fragment labelled rep can lose a card.
+        other = set().union(*map(_words, heard))
+        return len(words & other) / len(words) >= (0.7 if len(words) >= 3 else 1.0)
+
+
+def _words(text: str) -> set[str]:
+    return {w.strip(".,!?;:'\"").lower() for w in text.split()} - {""}
 
 
 SESSION = Session()

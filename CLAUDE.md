@@ -31,7 +31,7 @@ cd frontend && npm run build
 | `cd backend && .venv/Scripts/python test_trigger.py` | no | regex extractor + wording-based speaker cues |
 | `cd backend && .venv/Scripts/python test_retrieval.py` | Nebius | paraphrased questions → right doc |
 | `cd backend && .venv/Scripts/python eval_conversations.py` | Nebius | 4 labelled calls in `demo/conversations.json`: gate recall/precision, doc accuracy, rule verdicts |
-| `backend/.venv/Scripts/python tools/test_audio.py [--call NAME] [--calibrate]` | both + running server | full call in two TTS voices into ONE audio socket; speaker accuracy, cards, API calls, latency (~4 min) |
+| `backend/.venv/Scripts/python tools/test_audio.py [--call NAME] [--calibrate] [--meet [--echo]]` | both + running server | full call in two TTS voices into ONE audio socket (or two with `--meet`: tab = customer, mic = rep; `--echo` leaks customer audio into the mic); speaker accuracy, cards, API calls, latency (~4 min) |
 | `backend/.venv/Scripts/python tools/check_keys.py` | both | lists Nebius models, times them, tests TTS + STT |
 
 Set `PYTHONIOENCODING=utf-8` when running on Windows (cp1252 console chokes on ≥, ’, etc.).
@@ -65,7 +65,9 @@ summary, `/customer` soundboard.
 - Models via **Nebius only**: `FAST_MODEL`/`SMART_MODEL` = `openai/gpt-oss-120b` (`reasoning_effort=low`), embeddings
   auto-picked (`Qwen/Qwen3-Embedding-8B`). The user wanted Opus 5.5 as the smart model, but Nebius doesn't serve
   Claude models; still open whether to switch to a larger Nebius model or add an Anthropic key (user hasn't decided).
-- Speaker ID must be voice-based in single-mic mode (user rejected keyword-only detection). Meet mode uses the source.
+- Speaker ID must be voice-based in single-mic mode (user rejected keyword-only detection). Call-tab mode ("Call tab +
+  mic", the default) uses the source: tab audio = customer, mic = rep; rep-mic turns that repeat recent customer words
+  are dropped as speaker echo (`Session.is_echo`). Verified live on a real Google Meet call.
 - Don't call APIs on small talk (user requirement: faster, cheaper). Keep the gate in front of every LLM/embedding call.
 - Coverage must go beyond discounts: objections, security, integrations, procurement, etc.
 - Audio permission is requested once per page session; Pause/End/New call must not re-prompt.

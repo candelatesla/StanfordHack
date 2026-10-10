@@ -115,7 +115,19 @@ def manual_flip(ws):
     print("MANUAL FLIP OK")
 
 
+def meet_echo(ws):
+    """Meet mode without headphones: the rep mic re-hears the customer; only the rep's own words become rep turns."""
+    fresh(ws)
+    say(ws, "Do you integrate with Snowflake and Salesforce?", speaker="customer")
+    ws.send_json({"type": "text_turn", "speaker": "rep", "text": "do you integrate with snowflake and salesforce"})
+    stats = until(ws, lambda e: e["type"] == "stats" and e.get("echoes"))
+    assert stats["echoes"] == 1, stats
+    turn = say(ws, "Yes, both, natively.", speaker="rep")
+    assert turn["speaker"] == "rep", turn
+    print("MEET ECHO OK")
+
+
 with TestClient(app) as client:
-    for scenario in (golden, split_and_dedupe, multi_intent, manual_flip):
+    for scenario in (golden, split_and_dedupe, multi_intent, manual_flip, meet_echo):
         with client.websocket_connect("/ws/events") as ws:
             scenario(ws)

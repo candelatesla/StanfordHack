@@ -18,8 +18,8 @@ registerProcessor("pcm-capture", PcmCapture);
 const CHUNK_SAMPLES = 1600; // 100ms at 16kHz
 
 export const MODES = {
-  mic: { label: "This mic only", hint: "One mic hears both people; speakers are auto-detected" },
-  meet: { label: "Meet tab + mic", hint: "Tab audio = customer, your mic = rep (most reliable)" },
+  meet: { label: "Call tab + mic", hint: "Share the call tab (Meet, Zoom web, Teams web): tab audio = customer, your mic = rep. Most reliable; wear headphones." },
+  mic: { label: "Single mic (in person)", hint: "One mic hears both people; speakers are told apart by voice" },
 };
 
 // Opens the devices for a mode. Returns [{ speaker, stream }].
@@ -31,7 +31,15 @@ export async function openDevices(mode) {
   let tab;
   try {
     // User picks the Meet tab and ticks "Also share tab audio".
-    tab = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    // Hints (Chrome/Edge): open the picker on "Chrome Tab", tab audio on, hide DealBrain's own tab.
+    tab = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: "browser" },
+      audio: { echoCancellation: false, noiseSuppression: false },
+      preferCurrentTab: false,
+      selfBrowserSurface: "exclude",
+      surfaceSwitching: "include",
+      systemAudio: "include",
+    });
   } catch (e) {
     mic.getTracks().forEach((t) => t.stop());
     throw e;
@@ -39,7 +47,7 @@ export async function openDevices(mode) {
   tab.getVideoTracks().forEach((t) => t.stop());
   if (!tab.getAudioTracks().length) {
     mic.getTracks().forEach((t) => t.stop());
-    throw new Error('No tab audio. Share again and tick "Also share tab audio".');
+    throw new Error('No tab audio. Start again, pick the call\'s tab under "Chrome Tab" and keep "Also share tab audio" on.');
   }
   return [
     { speaker: "customer", stream: new MediaStream(tab.getAudioTracks()) },
