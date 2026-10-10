@@ -1,4 +1,4 @@
-# DealBrain
+# CLOSER: Contextual Live-call Optimization for Sales, Engagement & Retrieval
 
 Live sales copilot: listens to a call, works out who is speaking, stays quiet through greetings and small talk,
 and when the customer asks for something or raises a concern it checks the Company Brain (docs + deterministic
