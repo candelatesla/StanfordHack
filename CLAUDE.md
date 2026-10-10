@@ -53,10 +53,12 @@ Never click "New call"/↺ in the UI while `tools/test_audio.py` runs: the serve
 - `agent/retrieve.py`, `brain/ingest.py` — sentence-level hybrid search: utterance embedding (0.8) + sqrt(BM25) (0.2).
 - `agent/rules.py` + `brain/rules.json` — **authoritative** decisions; the LLM never decides what's allowed.
 - `agent/respond.py` — answer + "say" line; knowledge questions answered from sources.
-- `crm.py` (SQLite, recreated on reset), `contract.py` (clause diff), `summary.py`.
+- `crm.py` (SQLite: accounts, deals past + open, calls, change log; reseeded on server start; "reset" = restart the
+  call and undo its CRM changes via `undo_call`), `contract.py` (clause diff), `summary.py` (End call also logs the call).
 - `brain/docs/*.md` — 25 docs; keep them consistent with `rules.json` (docs give the snippet, rules give the decision).
 
-Frontend (`frontend/src`): `App.jsx` (reducer over events, audio lifecycle), `audio/capture.js` (devices opened once per
+Frontend (`frontend/src`): `components/Setup.jsx` (pre-call: existing customer search + dashboard, or new customer
+form; Start call -> `POST /api/accounts/{id}/call`), `App.jsx` (reducer over events, audio lifecycle), `audio/capture.js` (devices opened once per
 page session; pause = stop sending, not stop tracks; socket auto-reconnect), components for transcript, cards, deal, diff,
 summary, `/customer` soundboard.
 

@@ -13,12 +13,14 @@ from voice import VoiceRoster
 class Session:
     def __init__(self):
         self.clients: set[WebSocket] = set()
+        self.deal_id = crm.DEMO_DEAL["id"]
         self.reset()
 
-    def reset(self):
-        crm.init(reset=True)
-        self.deal_id = crm.DEMO_DEAL["id"]
-        self.initial_deal = crm.get_deal(self.deal_id)
+    def reset(self, deal_id: str | None = None):
+        """New call on deal_id (default: the same deal). The CRM itself is never wiped here."""
+        crm.init()
+        self.deal_id = deal_id or self.deal_id
+        self.initial_deal = crm.get_deal(self.deal_id)  # deal as it was when the call started
         self.transcript: list[dict] = []
         self.suggestions: dict[str, dict] = {}
         self.accepted: list[str] = []

@@ -7,7 +7,7 @@ import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -21,6 +21,7 @@ import voice
 from agent.llm import warmup
 from agent import speaker as speaker_id
 from agent.pipeline import process_turn
+from agent.rules import RULES
 from brain.ingest import INDEX, build_index
 from session import SESSION
 
@@ -37,7 +38,7 @@ def spawn(coro):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    crm.init()
+    crm.init(reset=True)  # demo CRM is reseeded on every server start
     SESSION.reset()
     await build_index()
     if config.LLM_ENABLED:
@@ -70,6 +71,44 @@ async def health():
 @app.get("/api/deal")
 async def get_deal():
     return deal_snapshot()
+
+
+@app.get("/api/accounts")
+async def accounts():
+    return {"accounts": crm.list_accounts(), "tiers": list(RULES["tiers"]), "industries": crm.INDUSTRIES}
+
+
+@app.get("/api/accounts/{account_id}")
+async def account(account_id: str):
+    acc = crm.get_account(account_id)
+    if acc is None:
+        raise HTTPException(404)
+    return acc
+
+
+@app.post("/api/accounts")
+async def new_account(body: dict = Body(...)):
+    try:
+        return crm.create_account(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/accounts/{account_id}/call")
+async def call_account(account_id: str):
+    """Pre-call screen -> live call on this account's open deal (one is opened if there is none)."""
+    try:
+        deal = crm.open_deal(account_id)
+    except KeyError:
+        raise HTTPException(404)
+    await start_call(deal["id"])
+    return {"deal": SESSION.deal}
+
+
+async def start_call(deal_id: str):
+    SESSION.reset(deal_id)
+    await SESSION.emit({"type": "init", **deal_snapshot(), "transcript": [], "suggestions": [],
+                        "status": status(), "stats": {**SESSION.stats, "voices": []}})
 
 
 async def handle_turn(speaker: str, text: str, voiceprint=None):
@@ -162,7 +201,7 @@ async def accept(sid: str):
         return
     SESSION.accepted.append(sid)
     card["resolution"] = "accepted"
-    old, new = crm.update_deal(SESSION.deal_id, card.get("proposed_changes") or {})
+    old, new = crm.update_deal(SESSION.deal_id, card.get("proposed_changes") or {}, SESSION.call_id)
     await SESSION.emit({"type": "suggestion_resolved", "id": sid, "resolution": "accepted"})
     await SESSION.emit({"type": "deal_update", "id": sid, "fields": new, "contract": contract.clauses(new),
                         "changes": contract.diff(old, new),
@@ -204,11 +243,12 @@ async def ws_events(ws: WebSocket):
             elif kind == "escalate":
                 await escalate(msg["id"])
             elif kind == "end_call":
-                await SESSION.emit(await summary.build(SESSION))
-            elif kind == "reset":
-                SESSION.reset()
-                await SESSION.emit({"type": "init", **deal_snapshot(), "transcript": [], "suggestions": [],
-                                    "status": status(), "stats": {**SESSION.stats, "voices": []}})
+                out = await summary.build(SESSION)
+                crm.log_call(SESSION.call_id, SESSION.deal, out)
+                await SESSION.emit(out)
+            elif kind == "reset":  # restart this call: undo what it changed in the CRM
+                crm.undo_call(SESSION.deal_id, SESSION.initial_deal, SESSION.call_id)
+                await start_call(SESSION.deal_id)
     except WebSocketDisconnect:
         pass
     finally:

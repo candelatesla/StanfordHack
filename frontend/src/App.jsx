@@ -6,14 +6,7 @@ import SuggestionCard from "./components/SuggestionCard.jsx";
 import DealPanel from "./components/DealPanel.jsx";
 import ContractDiff from "./components/ContractDiff.jsx";
 import PostCallSummary from "./components/PostCallSummary.jsx";
-
-const GOLDEN = [
-  "Can you do 20% off if we sign for 3 years?",
-  "We're in healthcare. Do you sign a HIPAA BAA?",
-  "We need net-60 payment terms.",
-  "Can you raise the liability cap to 3x fees?",
-  "We'd need net 60, and does that include a HIPAA BAA?",
-];
+import Setup from "./components/Setup.jsx";
 
 const initial = {
   transcript: [],
@@ -138,6 +131,7 @@ export default function App() {
   const [audioStatus, setAudioStatus] = useState("");
   const [audioError, setAudioError] = useState("");
   const [draft, setDraft] = useState("");
+  const [screen, setScreen] = useState(null); // "setup" (pick customer) | "call"; null until the server says hi
   const events = useRef(null);
   const feedEnd = useRef(null);
 
@@ -156,6 +150,11 @@ export default function App() {
   useEffect(() => {
     feedEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [state.suggestions.length]);
+
+  // First load: straight back into a call that is already running (page reload), otherwise the pre-call screen.
+  useEffect(() => {
+    if (screen === null && state.deal) setScreen(state.transcript.length ? "call" : "setup");
+  }, [state.deal]);
 
   const send = (msg) => events.current?.send(msg);
   const live = senders.length > 0;
@@ -232,10 +231,25 @@ export default function App() {
     send({ type: "end_call" });
   };
 
-  const newCall = () => {
+  const restartCall = () => {
     send({ type: "reset" });
     senders.forEach((s) => s.setPaused(false));
     setPaused(false);
+  };
+
+  // Pre-call screen -> live call on that account (audio devices stay open; they just resume).
+  const startCall = async (accountId) => {
+    const r = await fetch(`/api/accounts/${accountId}/call`, { method: "POST" });
+    if (!r.ok) throw new Error(`Could not start the call (${r.status})`);
+    senders.forEach((s) => s.setPaused(false));
+    setPaused(false);
+    setScreen("call");
+  };
+
+  const backToAccounts = () => {
+    senders.forEach((s) => s.setPaused(true));
+    setPaused(true);
+    setScreen("setup");
   };
 
   const deal = state.deal;
@@ -250,12 +264,21 @@ export default function App() {
           ? ["ok", "Ready"]
           : ["warn", "Reconnecting"];
 
+  if (screen !== "call") {
+    return screen === "setup"
+      ? <Setup initialAccount={deal?.account_id} onStart={startCall} />
+      : <div className="empty center">Connecting to DealBrain…</div>;
+  }
+
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
+          {(!listening || state.callEnded) && (
+            <button className="btn ghost sm" onClick={backToAccounts} title="Back to the customer's page">←</button>
+          )}
           <span className="logo">◆</span> DealBrain
-          <span className="crumb">Nimbus × {deal?.customer || "…"}</span>
+          <span className="crumb">Nimbus × {deal?.customer || "…"}{deal?.name ? ` · ${deal.name}` : ""}</span>
         </div>
         <div className="topbar-right">
           <span className={`pill ${pill[0]}`}>
@@ -301,11 +324,11 @@ export default function App() {
             </>
           )}
           {state.callEnded ? (
-            <button className="btn primary" onClick={newCall}>New call</button>
+            <button className="btn primary" onClick={backToAccounts}>Back to {deal?.customer || "customer"}</button>
           ) : (
             <button className="btn danger" onClick={endCall}>End call</button>
           )}
-          <button className="btn ghost" onClick={newCall} title="Reset demo deal">↺</button>
+          <button className="btn ghost" onClick={restartCall} title="Restart this call and undo its CRM changes">↺</button>
         </div>
       </header>
       {audioError && <div className="banner">{audioError}</div>}
@@ -330,16 +353,9 @@ export default function App() {
             onFlip={(t) => send({ type: "set_speaker", id: t.id, speaker: t.speaker === "customer" ? "rep" : "customer" })}
           />
           <div className="composer">
-            <div className="golden">
-              {GOLDEN.map((g, i) => (
-                <button key={g} className="chip" onClick={() => sendTurn(g)} title={g}>
-                  {i + 1}. {g.slice(0, 28)}…
-                </button>
-              ))}
-            </div>
             <form onSubmit={(e) => { e.preventDefault(); sendTurn(draft); }}>
               <input value={draft} onChange={(e) => setDraft(e.target.value)}
-                placeholder="Type what either person says; the speaker is detected automatically" />
+                placeholder="No audio? Type what was said; the speaker is detected automatically" />
               <button className="btn primary" type="submit">Send</button>
             </form>
           </div>
