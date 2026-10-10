@@ -28,6 +28,8 @@ MIN_VOICED_S = 0.8      # shorter clips give unreliable voiceprints
 SAME_SPEAKER = 0.72     # below this to every known voice -> a new speaker
 MERGE_SPEAKERS = 0.78   # two voice clusters whose averages converge this close are one person
 MIN_NEW_SPEAKER_S = 1.5  # only a clip at least this long may register a new speaker
+RELIABLE_S = 1.3         # shorter clips (STT fragments like "can you fill that out?") give shaky voiceprints
+CONTINUATION_S = 3.0     # a short fragment this soon after a turn is usually the same person continuing
 ESTABLISHED = 3.0       # how far the rep's voice must lead the others in evidence before voices decide
 MAX_SPEAKERS = 4
 
@@ -114,6 +116,8 @@ class VoiceRoster:
         best = max(sims, key=sims.get) if sims else None
         can_be_new = seconds >= MIN_NEW_SPEAKER_S and len(self.speakers) < MAX_SPEAKERS
         if best is not None and (sims[best] >= SAME_SPEAKER or not can_be_new):
+            if seconds < RELIABLE_S:
+                return best, sims[best]  # too short to trust: match, but don't let it drift the profile
             sp = self.speakers[best]
             c = sp["centroid"] * sp["n"] + v
             sp["centroid"], sp["n"] = c / np.linalg.norm(c), sp["n"] + 1

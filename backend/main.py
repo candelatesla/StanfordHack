@@ -77,7 +77,7 @@ async def handle_turn(speaker: str, text: str, voiceprint=None):
     voiceprint: this utterance's voice embedding (single-mic audio), used to tell people apart."""
     if speaker == "auto":
         roster = SESSION.roster
-        vp, seconds = voiceprint if voiceprint is not None else (None, 0.0)
+        vp, seconds = voiceprint if voiceprint is not None else (None, None)  # seconds None = typed, no audio
         vid, sim = roster.identify(vp, seconds) if vp is not None else (None, 0.0)
         if vid is not None:
             print(f"[voice] speaker {vid} sim={sim:.2f} role={roster.role(vid)} | {text[:50]!r}")
@@ -90,7 +90,14 @@ async def handle_turn(speaker: str, text: str, voiceprint=None):
         else:
             voice_role, strength = roster.role(vid)
             guess, score = speaker_id.guess(text, SESSION.transcript[-6:], list(SESSION.suggestions.values()))
-            if voice_role and strength >= voice.ESTABLISHED:
+            prev = SESSION.transcript[-1] if SESSION.transcript else None
+            fragment = (seconds is not None and seconds < voice.RELIABLE_S and prev is not None
+                        and time.time() - prev["ts"] < voice.CONTINUATION_S + seconds)
+            if fragment and prev.get("confident"):
+                # STT split one person's sentence; a sub-second voiceprint is less reliable than continuity
+                turn = SESSION.add_turn(prev["speaker"], text, auto=True, confident=True)
+                turn["via"] = "continuation"
+            elif voice_role and strength >= voice.ESTABLISHED:
                 # this voice's role is known: trust the voice, not the wording
                 turn = SESSION.add_turn(voice_role, text, auto=True, confident=True)
                 turn["via"] = "voice"
@@ -202,7 +209,7 @@ async def ws_audio(ws: WebSocket, speaker: str = "auto"):
             if voiced:
                 clip = voiced.take()
                 emb = await asyncio.to_thread(voice.MODEL.embed, clip)
-                vp = (emb, len(clip) / 32000) if emb is not None else None
+                vp = (emb, len(clip) / 32000)  # emb is None for clips too short to fingerprint
             await handle_turn(speaker, text, vp)
         else:
             await SESSION.emit({"type": "transcript", "speaker": speaker, "text": text,
