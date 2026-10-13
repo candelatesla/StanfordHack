@@ -1,178 +1,217 @@
-# 🎯 CLOSER: Contextual Live-call Optimization for Sales, Engagement & Retrieval
+# CLOSER
+### Live sales answers grounded in company policy
 
-🌐 **Live app: https://closer-stanford-hack.replit.app/**
+**Top 8 finalist** at the Future of Work Hackathon: Building from the Farm, hosted at Stanford University on October 9–10, 2026.
 
-> 🏆 Built at the **Future of Work Hackathon: Building from the Farm** @ Stanford University 🌲 #SFTechWeek
-> 📅 October 9–10, 2026
+CLOSER is a live AI sales copilot that helps representatives answer pricing, contract, and product questions during a call. It retrieves supporting company information, applies commercial approval rules, and suggests a response while the human leads the conversation.
 
-> 🎯 **Track 4: Sales Without "Let Me Get Back to You"**
->
-> High-value B2B deals ($100k+ ARR) stall the moment a customer asks for custom terms, compliance exceptions, or
-> non-standard pricing. How can you unify pricing models, legal guardrails, and product capabilities scattered across
-> enterprise tools into a single vectorized "Company Brain" that can be queried in sub-500ms during a live
-> conversation? Can that voice agent listen to a live sales call, evaluate customer demands against that Company
-> Brain in real time, negotiate trade-offs within pre-approved limits, and update the CRM/contract on the fly?
+[Live app](https://closer-stanford-hack.replit.app/) · [Demo video](https://drive.google.com/file/d/1GAivhtHIVBHeEsfU7xI63K0ttm45Vp_t/view?usp=sharing) · [Presentation](https://docs.google.com/presentation/d/1OGUwgM_Jkfj1gyu0GmQol709y0xLPiwS/edit?usp=sharing) · [Project materials](https://drive.google.com/drive/folders/1MhbAmyQwKtMMFPvZ6TkTdU3sfCU3M8ih?usp=sharing)
 
-A live sales copilot 🎧 that listens to a call, works out who is speaking, stays quiet through greetings and small
-talk, and when the customer asks for something or raises a concern it checks the Company Brain 🧠 (docs +
-deterministic rules) and shows the rep an approved answer and a line to say ⚡ in well under a second. Accepted terms
-update the CRM and contract 📝; the call ends with a post-call summary 📋.
+## Why we built it
 
----
+A customer asks for a discount, a security commitment, or different payment terms. The representative needs information from finance, legal, or product teams before answering confidently.
 
-## 😩 The problem
+CLOSER brings those documents and approval boundaries into the call. The goal is to reduce avoidable follow-ups and help representatives respond with evidence. Business impact has not yet been measured in customer pilots.
 
-A customer asks a hard question mid-call: a discount, HIPAA, contract terms, an integration. The rep doesn't know the
-answer, or what they're allowed to say, so they promise a follow-up:
+Built for **Track 4: Sales Without “Let Me Get Back to You”**, which challenged teams to connect live voice, a searchable Company Brain, bounded negotiation, and deal updates.
 
-> 🧑‍💼 **Customer:** Can you do 20% off if we sign for 3 years?
-> 🙋 **Rep:** Let me check with my manager and get back to you.
-> 🧑‍💼 **Customer:** And do you sign a HIPAA agreement?
-> 🙋 **Rep:** I'll confirm with legal and email you.
+## What the product does
 
-Two questions, two follow-ups, no decision ⏳. The deal waits days and loses momentum 📉.
+- Transcribes live call audio and helps distinguish the customer from the representative.
+- Filters irrelevant conversation before request extraction and retrieval.
+- Combines semantic search with keyword search across company documents.
+- Shows policy evidence, a recommendation, and suggested wording.
+- Applies structured rules to return an approved option, counteroffer, or escalation requirement.
+- Updates the demo CRM and contract draft when the representative accepts a card.
+- Generates a post-call summary and displays API usage and timing details.
 
-## 💡 The solution
+### Example conversation
 
-CLOSER answers while the customer is still talking:
+The demo uses fictional seller **Nimbus Analytics** and customer **Acme Health**.
 
-1. 👂 **Listens:** follows the call live and knows who is speaking.
-2. 🔎 **Checks:** looks up the company's own documents and approval rules.
-3. 💬 **Suggests:** an approved answer plus a line to say, right on the rep's screen.
+| Customer request | CLOSER response |
+| --- | --- |
+| “Can you offer 20% off for three years?” | Suggests the pre-approved 15% alternative and shows the discount policy. |
+| “Do you sign a HIPAA BAA?” | Retrieves the Enterprise policy and supporting passage. |
+| “Can we have Net 60?” | Checks the deal against the payment-term rule. |
+| “What about Net 90?” | Identifies the Finance approval requirement. |
 
-> 🃏 **What the rep sees**
-> Customer: *"Can you do 20% off if we sign for 3 years?"*
-> 20% needs VP approval. 15% on a 3-year term is pre-approved.
-> 🗣️ **Say:** *"For a three-year commitment, I can do 15% today."*
-> ✅ Accept  ·  ⬆️ Escalate
+Accepting the 15% counteroffer on a $150,000 annual list price updates the annual fee to $127,500 and shows the corresponding contract changes. These are fictional demo policies, not claims about CLOSER's compliance status.
 
-🤫 Small talk is ignored (no API calls at all). ✅ Accepting a card updates the CRM and contract automatically.
-
----
-
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
-flowchart LR
-    A["🎙️ Call audio<br/>tab = customer, mic = rep<br/>(WebSocket, 16 kHz)"] --> B["🗣️ ElevenLabs<br/>Scribe v2 Realtime STT"]
-    B --> C["🧬 Who's speaking<br/>voiceprints · sherpa-onnx<br/>(local, free)"]
-    C --> D{"🚦 Small-talk gate<br/>(local, free)"}
-    D -- "👋 small talk" --> X["🤫 nothing<br/>no API call"]
-    D -- "❓ real ask" --> E["🧠 Nebius GPT-OSS-120B<br/>extract asks"]
-    E --> F["📚 Hybrid search<br/>Nebius Qwen3 embeddings + BM25"]
-    E --> G["⚖️ Rules engine<br/>rules.json (authoritative)"]
-    F --> H["💬 Nebius GPT-OSS-120B<br/>streams ANSWER + SAY"]
-    G --> H
-    H --> I["🃏 Rep card<br/>Accept / Escalate"]
-    I --> J["🗄️ CRM + 📝 contract diff<br/>+ 📋 post-call summary"]
+flowchart TD
+    A["Call audio"] --> B["ElevenLabs transcription"]
+    B --> C["Speaker attribution"]
+    C --> D{"Local relevance gate"}
+    D -- "Skip" --> E["Transcript only"]
+    D -- "Relevant request" --> F["Contextual request extraction"]
+    F --> G["Embeddings and BM25 retrieval"]
+    F --> H["Commercial rules"]
+    G --> I["Suggested response and policy evidence"]
+    H --> I
+    I --> J["Representative accepts or escalates"]
+    J --> K["Demo CRM and contract draft"]
 ```
 
-☁️ Everything runs as one FastAPI process on a single always-on **Replit** VM, serving the React UI, the REST API and
-the WebSockets on one port.
+The FastAPI backend serves the built React interface, REST endpoints, and WebSockets on one port. The hackathon deployment runs on Replit.
 
-### 🔄 How a turn flows
+### Engineering choices
 
-| Step | File | What happens |
-|---|---|---|
-| 🗣️ STT | `backend/stt.py` | ElevenLabs Scribe v2 realtime. If the upstream socket drops *or silently stalls* (speech sent, no reply for 2.5s), it reconnects and replays the audio since the last finished sentence, so nothing is lost. Batch STT fallback |
-| 🧬 Who spoke | `backend/voice.py`, `backend/agent/speaker.py` | **Meet mode:** the audio source. **Single mic:** each utterance's voiced audio → 256-d voiceprint (WeSpeaker ResNet34 via sherpa-onnx, local CPU, no API call) → online speaker clustering (with merging when one person's first clips split). Each voice's role is learned from calibration, your label corrections, the LLM's speaker calls and strong wording cues (e.g. reading the card aloud), decided *jointly* across voices. Once known, the voice alone labels every turn, small talk included |
-| 🚦 Gate | `backend/agent/gate.py` | Free, local: does this customer turn need an answer? Yes for recognised asks, or a question/request/concern about a topic the Company Brain covers (IDF-weighted overlap with its vocabulary). Greetings, rapport, travel, sports, "sounds good" → **no API call at all** |
-| 🧠 Understand | `backend/agent/trigger.py` | Instant extractor for ~30 situations (discounts, payment terms, pilots, renewal caps, start dates, fee waivers, seats, HIPAA, security, integrations, objections, procurement…); `FAST_MODEL` reads the whole sentence in context to confirm/revise, catch follow-ups and paraphrases, and add asks the keywords missed |
-| 📚 Retrieve | `backend/agent/retrieve.py`, `brain/ingest.py` | Hybrid, sentence-level: embedding of the whole utterance fused with BM25, rolled up to the paragraph; cards quote the 2 best sentences |
-| ⚖️ Decide | `backend/agent/rules.py` + `brain/rules.json` | **Authoritative** for negotiable asks (approved / counter / escalate + approver). Knowledge questions and objections are answered from the docs |
-| 💬 Respond | `backend/agent/respond.py` | `SMART_MODEL` streams `ANSWER:` / `SAY:` grounded in the verdict and sources |
-| 🗄️ CRM / contract / summary | `crm.py`, `contract.py`, `summary.py` | SQLite + clause-level diff + post-call summary |
+**Speech and speaker attribution are separate.** ElevenLabs provides transcription. In single-microphone mode, local WeSpeaker ResNet34 embeddings through sherpa-onnx support online voice clustering. Calibration, contextual cues, and manual corrections help map voices to customer or representative. In call-tab mode, tab audio and microphone input provide separate role-labeled sources.
 
-📊 The header shows live API usage (LLM calls, embedding calls, turns that cost nothing) and how many voices are known.
+**Retrieval combines meaning with exact terms.** Nebius embeddings support paraphrases; BM25 helps match terms such as “Net 60” and “BAA.” Retrieval operates at sentence level and returns supporting passages.
 
-### 🛡️ Design principles
+**Commercial limits come from structured rules.** The rules engine evaluates negotiable requests against `rules.json`. The language model interprets requests and writes responses using the verdict and retrieved evidence. Knowledge questions use document evidence.
 
-- ⚖️ **The LLM never decides what's allowed.** Discounts, payment terms and other negotiable limits come from
-  deterministic rules in `rules.json`; the model only phrases the answer.
-- 🤫 **No API calls on small talk.** A free local gate sits in front of every LLM and embedding call: faster and cheaper.
-- 🧬 **Speaker ID by voice, not keywords.** Voiceprints run locally on CPU; in call-tab mode, the audio source decides
-  (and rep-mic echo of the customer is dropped).
-- 🎤 **One permission prompt.** Mic/tab access is asked once per page session; Pause, End and New call reuse the streams.
+**The representative controls deal changes.** The interface provides Accept and Escalate actions. Accept changes the demo deal and contract draft; escalation displays the required approver.
 
----
+**The local gate limits unnecessary inference.** Greetings and irrelevant turns can avoid downstream language-model and query-embedding calls. Live transcription still uses an API, and local processing still consumes compute.
 
-## 🤝 Sponsor tech we used
+### Technology
 
-| Sponsor | What we use | Where |
-|---|---|---|
-| 🟢 **Nebius** | `openai/gpt-oss-120b` (`reasoning_effort=low`, ~400–500ms) to extract asks, verify speakers, write answer cards and the post-call summary; `Qwen/Qwen3-Embedding-8B` (auto-picked) for semantic search over the Company Brain | `agent/trigger.py`, `agent/respond.py`, `summary.py`, `agent/retrieve.py` |
-| 🔊 **ElevenLabs** | Scribe v2 **realtime** speech-to-text for the live call (with batch Scribe fallback); text-to-speech voices for simulated customer calls in our end-to-end audio tests | `stt.py`, `tools/test_audio.py`, `demo/` |
-| ☁️ **Replit** | Hosting: one always-on VM runs the whole app (UI + API + WebSockets on one port) at https://closer-stanford-hack.replit.app/ | `.replit`, `start.sh` |
+| Component | Technology |
+| --- | --- |
+| Backend and live events | Python, FastAPI, WebSockets |
+| Frontend | React, Vite |
+| Contextual extraction, response generation, summaries | Nebius Token Factory via the OpenAI SDK |
+| Language model default | `openai/gpt-oss-120b` |
+| Semantic retrieval | Nebius embeddings; embedding model selected from available models |
+| Keyword retrieval | BM25 |
+| Voice transcription | ElevenLabs Scribe v2 Realtime, with batch fallback |
+| Local voice embeddings | WeSpeaker ResNet34, sherpa-onnx |
+| Demo deal storage | SQLite |
+| Development and hosting | Replit |
 
-### 🧰 Models at a glance
+### Company Brain and storage
 
-| Role | Model | Notes |
-|---|---|---|
-| 🧠 Understand / verify | `openai/gpt-oss-120b` (Nebius) | only on turns that pass the gate |
-| 💬 Answer cards + summary | `openai/gpt-oss-120b` (`SMART_MODEL`, Nebius) | streamed, grounded in the rule verdict and sources |
-| 📚 Embeddings | `Qwen/Qwen3-Embedding-8B` (Nebius, auto-picked) | only on turns that pass the gate |
-| 🧬 Voiceprints | WeSpeaker ResNet34 (local, sherpa-onnx) | no API call |
-| 🗣️ Speech-to-text | ElevenLabs Scribe v2 realtime | streaming, auto-reconnect |
+The repository includes 25 Markdown documents in `backend/brain/docs/` covering pricing, payment terms, security, integrations, product capabilities, contract terms, and sales objections.
 
-### 🛠️ Rest of the stack
+At startup, the backend splits documents into paragraphs and sentences, builds the BM25 index, and requests document embeddings when Nebius is configured. Normalized vectors are stored in a NumPy array in backend memory. Nebius generates the embeddings; it does not store this application's vector index.
 
-🐍 Python · ⚡ FastAPI (REST + WebSockets) · ⚛️ React + Vite · 🗄️ SQLite · 🧬 sherpa-onnx
+If embeddings are unavailable, retrieval falls back to BM25. Commercial rules live in `backend/brain/rules.json`. Deal data uses SQLite.
 
----
+## Run locally
 
-## 🧠 Company Brain
+You need Python 3.10 or later, Node.js with npm, and provider credentials for live voice and AI features.
 
-📚 25 docs in `backend/brain/docs/` covering the whole call, not just pricing: tiers, discounts, payment terms,
-pilots, implementation/onboarding, renewals and contract terms, seats, integrations, security, data ownership,
-compliance (HIPAA, SOC 2, GDPR, residency), liability, SLA/support, AI features, roadmap, references,
-procurement, company overview, and objection talk tracks (price, competitor, timing/budget, stakeholders).
-⚖️ `rules.json` holds the negotiable limits; docs and rules agree.
-
-🏢 Demo world: the seller is **Nimbus Analytics** (fictional); the demo customer is **Acme Health**.
-
----
-
-## 🚀 Run locally
-
-<details>
-<summary>Setup commands</summary>
+### 1. Clone and configure
 
 ```bash
-cp .env.example .env            # 🔑 add your API keys
-# backend
-cd backend && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # (bin/ on mac/linux)
-.venv/Scripts/python ../tools/get_voice_model.py   # 26.5 MB speaker-recognition model (one time)
-.venv/Scripts/python -m uvicorn main:app --reload --port 8000
-# frontend (second terminal)
-cd frontend && npm install && npm run dev      # http://localhost:5173
+git clone https://github.com/candelatesla/StanfordHack.git
+cd StanfordHack
+cp .env.example .env
 ```
 
-🔑 Keys (in `.env`): `NEBIUS_API_KEY`, `ELEVENLABS_API_KEY`.
-📦 Single-port mode (also what Replit runs): `bash start.sh` → http://localhost:8000
-🩺 Health check: `/api/health` shows whether the LLM, STT, hybrid search and voice model are enabled.
+Add `NEBIUS_API_KEY` and `ELEVENLABS_API_KEY` to `.env`. Keep credentials out of source control. Without keys, the app supports a reduced rules-based text mode.
 
-</details>
+Optional settings in `.env.example` include `FAST_MODEL`, `SMART_MODEL`, `EMBED_MODEL`, `NEBIUS_BASE_URL`, `STT_MODE`, and `TTS_VOICE_ID`. Model availability depends on your account.
 
-## 🧪 Evaluation
+### 2. Start the backend
 
-<details>
-<summary>Test and eval scripts</summary>
+macOS/Linux:
 
-| Command (from repo root) | Needs | What it checks |
-|---|---|---|
-| `cd backend && .venv/Scripts/python eval_conversations.py` | Nebius key for hybrid | 4 realistic calls (`demo/conversations.json`, 69 turns with greetings and rapport): gate recall/precision and calls saved, top doc for every needed answer, rule verdicts |
-| `backend/.venv/Scripts/python tools/test_audio.py [--call NAME] [--calibrate]` | keys + running backend | a whole call spoken by two ElevenLabs voices into ONE audio stream: speaker per turn, cards only where needed, API calls, speech-end→card latency |
-| `cd backend && .venv/Scripts/python test_golden.py` | nothing | golden demo, split sentences, multi-ask turns, manual speaker flip |
-| `cd backend && .venv/Scripts/python test_trigger.py` | nothing | instant extractor + wording-based speaker cues |
-| `cd backend && .venv/Scripts/python test_retrieval.py` | Nebius key for hybrid | paraphrased questions → right doc |
-| `backend/.venv/Scripts/python tools/check_keys.py` | keys | lists Nebius models, times them; tests TTS + batch + realtime STT |
+```bash
+python3 -m venv backend/.venv
+source backend/.venv/bin/activate
+python -m pip install -r backend/requirements.txt
+python tools/get_voice_model.py
+cd backend
+python -m uvicorn main:app --reload --port 8000
+```
 
-</details>
+Windows PowerShell, from the repository root:
 
----
+```powershell
+py -m venv backend/.venv
+.\backend\.venv\Scripts\Activate.ps1
+python -m pip install -r backend/requirements.txt
+python tools/get_voice_model.py
+cd backend
+python -m uvicorn main:app --reload --port 8000
+```
 
-## 👥 Team
+The voice-model download is needed for local voice embeddings.
 
-1. 🧑‍💻 Yash Chetan Doshi
-2. 🧑‍💻 Ritik Ashok Manghani
-3. 🧑‍💻 Sarvesh Shirude
+### 3. Start the frontend
+
+In a second terminal, from the repository root:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. Backend health is available at `http://localhost:8000/api/health`.
+
+### Single-port deployment
+
+With Python, Node.js, and npm available:
+
+```bash
+bash start.sh
+```
+
+This installs dependencies, builds the frontend, downloads the voice model, and starts FastAPI. It uses `PORT` when provided, otherwise port 8000.
+
+## Try the demo
+
+1. Open the app and select a customer account.
+2. Choose **Single mic** for an in-person conversation, or **Call tab + mic** for a browser call.
+3. In single-mic mode, calibrate the representative's voice. Speaker labels can be corrected.
+4. In call-tab mode, share the call tab's audio and use headphones to reduce echo.
+5. Ask about a discount, BAA, or payment terms.
+6. Review the recommendation and evidence before accepting or escalating.
+7. Inspect the deal and contract diff, then end the call for a summary.
+
+Typed input provides an alternative to microphone input. The `/customer` page contains a scripted customer soundboard. Browser audio capture requires appropriate permissions and a supported secure context, such as localhost or HTTPS.
+
+## Evaluation
+
+From `backend/`, with the backend virtual environment active:
+
+```bash
+python test_golden.py
+python test_trigger.py
+python test_retrieval.py
+python eval_conversations.py
+```
+
+| Script | Purpose | Requirements |
+| --- | --- | --- |
+| `test_golden.py` | Demo flow, split sentences, multiple requests, speaker corrections | No provider keys |
+| `test_trigger.py` | Request extraction and wording-based role cues | No provider keys |
+| `test_retrieval.py` | Retrieval for paraphrased questions | Nebius key for hybrid mode |
+| `eval_conversations.py` | Gate, retrieval, and rule evaluation over sample calls | Nebius key for hybrid mode |
+
+From the repository root, with the same virtual environment active:
+
+```bash
+python tools/check_keys.py
+python tools/test_audio.py --calibrate
+```
+
+The audio test requires provider keys and a running backend. It uses two ElevenLabs voices in one audio stream to exercise the speech pipeline.
+
+These scripts are evaluation tooling, not a claim of production accuracy. Retrieval, first-token, and complete response timings have different measurement boundaries. The hackathon's sub-500ms retrieval target should not be interpreted as a demonstrated end-to-end guarantee.
+
+## Prototype status
+
+CLOSER is a hackathon prototype with a working demo workflow.
+
+- The current backend uses shared in-process call state. Independent concurrent calls and tenants require isolation.
+- The CRM is local demo storage, not a Salesforce or HubSpot integration.
+- Startup reseeds the demo CRM through `crm.init(reset=True)`; do not rely on it for durable business records.
+- Contract changes are draft updates, not signed agreements.
+- Voice attribution and generated responses can be incorrect and need representative review.
+- Authentication, access controls, retention settings, and production load testing remain future work.
+
+Next steps include customer pilots, isolated call sessions, managed persistence, versioned policy indexes, and controlled CRM connectors.
+
+## Team
+
+Built by **Yash Chetan Doshi**, **Ritik Ashok Manghani**, and **Sarvesh Shirude**.
+
+**Recognition:** Top 8 finalist, Future of Work Hackathon: Building from the Farm, Stanford University, October 2026.
